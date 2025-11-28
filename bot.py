@@ -795,7 +795,7 @@ def start_http_server(port: int):
     server.serve_forever()
 
 
-async def main():
+def main():
     """Funzione principale"""
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN non configurato!")
@@ -828,21 +828,35 @@ async def main():
     http_thread.start()
     
     # Configura job scheduler per monitoraggio periodico
-    job_queue = application.job_queue
-    if job_queue:
-        job_queue.run_repeating(
-            monitor.monitor_loop,
-            interval=POLL_INTERVAL,
-            first=10  # Inizia dopo 10 secondi
-        )
-        logger.info(f"Job scheduler configurato: controllo ogni {POLL_INTERVAL} secondi")
+    # Usa post_init per configurare dopo che l'applicazione è inizializzata
+    async def post_init(app: Application) -> None:
+        """Callback chiamato dopo l'inizializzazione dell'applicazione"""
+        job_queue = app.job_queue
+        if job_queue:
+            job_queue.run_repeating(
+                monitor.monitor_loop,
+                interval=POLL_INTERVAL,
+                first=10  # Inizia dopo 10 secondi
+            )
+            logger.info(f"Job scheduler configurato: controllo ogni {POLL_INTERVAL} secondi")
+        else:
+            logger.warning("JobQueue non disponibile - monitoraggio periodico disabilitato")
+    
+    application.post_init = post_init
     
     # Avvia bot
     logger.info("Bot avviato!")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # run_polling gestisce l'event loop internamente (non è async)
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+    import sys
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("Bot fermato dall'utente")
+    except Exception as e:
+        logger.error(f"Errore fatale: {e}")
+        sys.exit(1)
 
