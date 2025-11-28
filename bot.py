@@ -75,12 +75,20 @@ class KeepAliveHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
+        self.send_header('Cache-Control', 'no-cache')
         self.end_headers()
-        self.wfile.write(b'Bot is alive!')
+        response = b'<html><body><h1>Bot is alive!</h1><p>0-0 Monitor Bot is running.</p></body></html>'
+        self.wfile.write(response)
+    
+    def do_HEAD(self):
+        """Risponde a HEAD requests per servizi di ping"""
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
     
     def log_message(self, format, *args):
-        """Disabilita logging HTTP"""
-        pass
+        """Logging HTTP minimale"""
+        logger.debug(f"HTTP {args[0]} {args[1]} - {args[2]}")
 
 
 def load_json_file(filename: str, default: any = None) -> any:
