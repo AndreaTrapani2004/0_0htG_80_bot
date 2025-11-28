@@ -72,7 +72,8 @@ logger = logging.getLogger(__name__)
 class KeepAliveHandler(BaseHTTPRequestHandler):
     """HTTP Handler per keep-alive su Render.com"""
     
-    def do_GET(self):
+    def _send_health_response(self):
+        """Invia risposta di health check"""
         self.send_response(200)
         self.send_header('Content-type', 'text/html')
         self.send_header('Cache-Control', 'no-cache')
@@ -80,15 +81,34 @@ class KeepAliveHandler(BaseHTTPRequestHandler):
         response = b'<html><body><h1>Bot is alive!</h1><p>0-0 Monitor Bot is running.</p></body></html>'
         self.wfile.write(response)
     
+    def do_GET(self):
+        """Gestisce richieste GET"""
+        if self.path == '/health' or self.path == '/':
+            self._send_health_response()
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
     def do_HEAD(self):
-        """Risponde a HEAD requests per servizi di ping"""
+        """Gestisce richieste HEAD (usate da Render e servizi di ping)"""
+        if self.path == '/health' or self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.send_header('Content-Length', '2')
+            self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_OPTIONS(self):
+        """Gestisce richieste OPTIONS"""
         self.send_response(200)
-        self.send_header('Content-type', 'text/html')
+        self.send_header('Allow', 'GET, HEAD, OPTIONS')
         self.end_headers()
     
     def log_message(self, format, *args):
-        """Logging HTTP minimale"""
-        logger.debug(f"HTTP {args[0]} {args[1]} - {args[2]}")
+        """Disabilita logging HTTP per ridurre spam"""
+        pass
 
 
 def load_json_file(filename: str, default: any = None) -> any:
@@ -111,25 +131,84 @@ def save_json_file(filename: str, data: any):
         logger.error(f"Errore salvataggio {filename}: {e}")
 
 
+def _fetch_sofascore_json(url: str, headers: Dict) -> Optional[Dict]:
+    """Tenta fetch diretto; su 403 usa fallback r.jina.ai come proxy pubblico."""
+    now_utc = datetime.utcnow().isoformat() + "Z"
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200:
+            try:
+                return resp.json()
+            except Exception:
+                logger.warning(f"[{now_utc}] ⚠️ JSON non valido dalla API diretta, lunghezza body={len(resp.text)}")
+                return None
+        if resp.status_code != 403:
+            logger.warning(f"[{now_utc}] ⚠️ Errore API SofaScore: status={resp.status_code}")
+            return None
+        
+        # Fallback via r.jina.ai (no crediti, spesso evita blocchi IP)
+        inner = url.replace("https://", "http://")
+        proxy_url = f"https://r.jina.ai/{inner}"
+        logger.info(f"[{now_utc}] 🔁 Fallback via r.jina.ai: {proxy_url}")
+        
+        prox_resp = requests.get(
+            proxy_url,
+            headers={
+                "User-Agent": headers.get("User-Agent", "Mozilla/5.0"),
+                "Accept": "application/json",
+            },
+            timeout=20,
+        )
+        if prox_resp.status_code == 200:
+            try:
+                wrapper = prox_resp.json()
+                # r.jina.ai restituisce un wrapper con data.content come stringa JSON
+                if isinstance(wrapper, dict) and "data" in wrapper:
+                    data_obj = wrapper.get("data", {})
+                    if isinstance(data_obj, dict) and "content" in data_obj:
+                        content_str = data_obj.get("content", "")
+                        if isinstance(content_str, str) and content_str.strip().startswith("{"):
+                            try:
+                                return json.loads(content_str)
+                            except Exception as e:
+                                logger.warning(f"[{now_utc}] ⚠️ Errore parse JSON annidato da r.jina.ai: {e}")
+                # Se non è il formato r.jina.ai, restituisci direttamente
+                return wrapper
+            except Exception:
+                # Alcuni proxy restituiscono testo JSON valido: prova json.loads
+                try:
+                    return json.loads(prox_resp.text)
+                except Exception:
+                    logger.warning(f"[{now_utc}] ⚠️ Impossibile parsare JSON dal fallback")
+                    return None
+        logger.warning(f"[{now_utc}] ⚠️ Fallback r.jina.ai fallito: status={prox_resp.status_code}")
+        return None
+    except Exception as e:
+        logger.error(f"[{now_utc}] ⚠️ Eccezione fetch SofaScore: {e}")
+        return None
+
+
 class SofaScoreAPI:
     """Classe per interagire con SofaScore API"""
     
     def __init__(self, base_url: str = SOFASCORE_BASE):
         self.base_url = base_url
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-        })
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.sofascore.com/",
+            "Origin": "https://www.sofascore.com"
+        }
     
     def get_tournaments(self) -> List[Dict]:
         """Recupera lista di tutti i tornei disponibili"""
         try:
             url = f"{self.base_url}/unique-tournaments"
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('uniqueTournaments', [])
+            data = _fetch_sofascore_json(url, self.headers)
+            if data:
+                return data.get('uniqueTournaments', [])
+            return []
         except Exception as e:
             logger.error(f"Errore recupero tornei: {e}")
             return []
@@ -137,11 +216,26 @@ class SofaScoreAPI:
     def get_live_matches(self) -> List[Dict]:
         """Recupera tutte le partite live"""
         try:
-            url = f"{self.base_url}/sport/football/events/live"
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            return data.get('events', [])
+            # Prova multipli endpoint per recuperare eventi live
+            endpoints = [
+                f"{self.base_url}/sport/football/events/live",
+                f"{self.base_url}/sport/football/events/inplay",
+                f"{self.base_url}/sport/football/livescore",
+            ]
+            
+            for url in endpoints:
+                data = _fetch_sofascore_json(url, self.headers)
+                if not data:
+                    continue
+                
+                # Normalizza le possibili chiavi
+                events = data.get("events") or data.get("results") or []
+                if events:
+                    logger.info(f"Trovate {len(events)} partite live da {url}")
+                    return events
+            
+            logger.warning("Nessun evento trovato su tutti gli endpoint live")
+            return []
         except Exception as e:
             logger.error(f"Errore recupero partite live: {e}")
             return []
@@ -150,9 +244,7 @@ class SofaScoreAPI:
         """Recupera dettagli di una partita specifica"""
         try:
             url = f"{self.base_url}/event/{event_id}"
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            return response.json()
+            return _fetch_sofascore_json(url, self.headers)
         except Exception as e:
             logger.error(f"Errore recupero dettagli partita {event_id}: {e}")
             return None
@@ -164,7 +256,16 @@ class MatchMonitor:
     def __init__(self, api: SofaScoreAPI, app: Application):
         self.api = api
         self.app = app
-        self.sent_matches: Set[int] = set(load_json_file(SENT_MATCHES_FILE, []))
+        
+        # Carica sent_matches (supporta sia lista che dict)
+        sent_data = load_json_file(SENT_MATCHES_FILE, [])
+        if isinstance(sent_data, list):
+            # Vecchio formato: lista di ID
+            self.sent_matches: Set[int] = set(sent_data)
+        else:
+            # Nuovo formato: dict con ID come chiavi
+            self.sent_matches: Set[int] = set(sent_data.keys() if isinstance(sent_data, dict) else [])
+        
         self.active_matches: Dict[int, Dict] = load_json_file(ACTIVE_MATCHES_FILE, {})
         self.monitored_leagues: Set[str] = set(load_json_file(LEAGUES_FILE, {}).get('leagues', []))
         
@@ -180,9 +281,22 @@ class MatchMonitor:
     def is_match_0_0_first_half(self, match: Dict) -> bool:
         """Verifica se partita è 0-0 al primo tempo"""
         try:
-            event = match.get('event', {})
-            home_score = event.get('homeScore', {}).get('current', 0)
-            away_score = event.get('awayScore', {}).get('current', 0)
+            # Gestisce sia formato con 'event' che formato diretto
+            event = match.get('event', match)
+            
+            # Estrai punteggio (sono oggetti con 'current' o 'display')
+            score_home_obj = event.get('homeScore', {})
+            score_away_obj = event.get('awayScore', {})
+            
+            if isinstance(score_home_obj, dict):
+                home_score = score_home_obj.get('current', score_home_obj.get('display', 0))
+            else:
+                home_score = score_home_obj if score_home_obj is not None else 0
+            
+            if isinstance(score_away_obj, dict):
+                away_score = score_away_obj.get('current', score_away_obj.get('display', 0))
+            else:
+                away_score = score_away_obj if score_away_obj is not None else 0
             
             # Deve essere 0-0
             if home_score != 0 or away_score != 0:
@@ -190,8 +304,36 @@ class MatchMonitor:
             
             # Verifica periodo e minuto
             status = event.get('status', {})
+            time_obj = event.get('time', {})
+            
+            # Estrai periodo
             period = status.get('period', 0)
-            minute = status.get('minute', 0)
+            status_desc = status.get('description', '').lower()
+            status_code = status.get('code')
+            
+            # Determina periodo da status
+            if '1st half' in status_desc or status_code == 6:
+                period = 1
+            elif '2nd half' in status_desc or status_code == 7:
+                period = 2
+            
+            # Estrai minuto
+            minute = None
+            if isinstance(time_obj, dict):
+                if 'currentPeriodStartTimestamp' in time_obj:
+                    start_ts = time_obj.get('currentPeriodStartTimestamp')
+                    if start_ts:
+                        elapsed_seconds = datetime.now().timestamp() - start_ts
+                        elapsed_minutes = int(elapsed_seconds / 60)
+                        if period == 2:
+                            minute = 45 + max(0, elapsed_minutes)
+                        elif period == 1:
+                            minute = max(0, elapsed_minutes)
+                        else:
+                            minute = max(0, elapsed_minutes)
+            
+            if minute is None:
+                minute = status.get('minute', 0)
             
             # Primo tempo: periodo = 1 o minuto <= 45
             if period == 1 or (period == 0 and minute > 0 and minute <= 45):
@@ -254,20 +396,39 @@ class MatchMonitor:
     def format_match_notification(self, match: Dict) -> str:
         """Formatta messaggio notifica partita"""
         try:
-            event = match.get('event', {})
-            home_team = event.get('homeTeam', {}).get('name', 'N/A')
-            away_team = event.get('awayTeam', {}).get('name', 'N/A')
+            # Gestisce sia formato con 'event' che formato diretto
+            event = match.get('event', match)
+            
+            home_team_obj = event.get('homeTeam', {})
+            away_team_obj = event.get('awayTeam', {})
+            home_team = home_team_obj.get('name', 'N/A') if isinstance(home_team_obj, dict) else str(home_team_obj)
+            away_team = away_team_obj.get('name', 'N/A') if isinstance(away_team_obj, dict) else str(away_team_obj)
+            
             tournament = match.get('tournament', {})
-            tournament_name = tournament.get('name', 'N/A')
+            tournament_name = tournament.get('name', 'N/A') if isinstance(tournament, dict) else 'N/A'
+            
             status = event.get('status', {})
-            minute = status.get('minute', 0)
+            time_obj = event.get('time', {})
+            
+            # Estrai minuto
+            minute = 0
+            if isinstance(time_obj, dict) and 'currentPeriodStartTimestamp' in time_obj:
+                start_ts = time_obj.get('currentPeriodStartTimestamp')
+                if start_ts:
+                    elapsed_seconds = datetime.now().timestamp() - start_ts
+                    minute = int(elapsed_seconds / 60)
+            
+            if minute == 0:
+                minute = status.get('minute', 0)
+            
             event_id = event.get('id', 0)
             
             message = f"⚽ 0-0 al primo tempo!\n\n"
             message += f"🏠 {home_team} - {away_team} 🏠\n"
             message += f"📊 {tournament_name}\n"
             message += f"⏱️ Minuto: {minute}'\n"
-            message += f"🔗 https://www.sofascore.com/event/{event_id}"
+            if event_id:
+                message += f"🔗 https://www.sofascore.com/event/{event_id}"
             
             return message
         except Exception as e:
@@ -324,7 +485,7 @@ class MatchMonitor:
                     logger.error(f"Errore processamento partita: {e}")
                     continue
             
-            # Salva stato
+            # Salva stato (sent_matches come lista per compatibilità)
             save_json_file(SENT_MATCHES_FILE, list(self.sent_matches))
             save_json_file(ACTIVE_MATCHES_FILE, self.active_matches)
             
