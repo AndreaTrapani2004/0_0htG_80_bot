@@ -32,6 +32,15 @@ SOFASCORE_PROXY_BASE=https://api.sofascore.com/api/v1
    - Copia il token ricevuto
 
 5. Ottieni il CHAT_ID:
+   
+   **Per un gruppo (consigliato):**
+   - Aggiungi il bot al gruppo come amministratore (opzionale ma consigliato)
+   - Invia un messaggio qualsiasi nel gruppo (puoi anche usare `/chatid` se il bot è già configurato)
+   - Visita `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
+   - Cerca `"chat":{"id":...}` nel JSON - il CHAT_ID sarà un numero negativo (es. `-1001234567890`)
+   - **Oppure**: Usa il comando `/chatid` nel gruppo dopo aver configurato il bot
+   
+   **Per una chat privata:**
    - Invia un messaggio al bot
    - Visita `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
    - Cerca `"chat":{"id":...}` nel JSON
@@ -58,6 +67,10 @@ Per istruzioni dettagliate sul deploy su Render.com e configurazione del keep-al
 - `/start` - Messaggio di benvenuto
 - `/help` - Guida comandi
 - `/addLeague` - Gestisci leghe da monitorare (interfaccia con checkbox)
+- `/leagues` - Mostra leghe attualmente monitorate
+- `/chatid` - Mostra il CHAT_ID della chat/gruppo corrente
+- `/stats` - Statistiche notifiche inviate
+- `/status` - Stato del bot
 
 ## Leghe Supportate
 

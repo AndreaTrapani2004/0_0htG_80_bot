@@ -33,32 +33,36 @@ LEAGUES_FILE = 'leagues.json'
 SENT_MATCHES_FILE = 'sent_matches.json'
 ACTIVE_MATCHES_FILE = 'active_matches.json'
 
-# Leghe iniziali da monitorare (slug/id da SofaScore)
+# Leghe iniziali da monitorare (usando tournament_id quando disponibile)
+# Formato: {tournament_id: {'name': 'Nome Lega', 'slug': 'slug-lega', 'country': 'Paese'}}
+# Se tournament_id non disponibile, usa slug come chiave
 INITIAL_LEAGUES = {
-    'estonia': {'name': 'Estonia', 'slug': 'estonia'},
-    'hong-kong': {'name': 'Hong Kong', 'slug': 'hong-kong'},
-    'netherlands': {'name': 'Olanda Eredivisie', 'slug': 'netherlands'},
-    'iceland-urva': {'name': 'Islanda URVA', 'slug': 'iceland-urva'},
-    'iceland-incasso': {'name': 'Islanda Incasso', 'slug': 'iceland-incasso'},
-    'luxembourg': {'name': 'Lussemburgo', 'slug': 'luxembourg'},
-    'qatar': {'name': 'Qatar', 'slug': 'qatar'},
-    'norway-elite': {'name': 'Norvegia Elite', 'slug': 'norway-elite'},
-    'norway-obos': {'name': 'Norvegia OBOS', 'slug': 'norway-obos'},
-    'singapore': {'name': 'Singapore', 'slug': 'singapore'},
-    'switzerland': {'name': 'Svizzera Super League', 'slug': 'switzerland'},
-    'vietnam': {'name': 'Vietnam', 'slug': 'vietnam'},
-    'italy-serie-a': {'name': 'Italia Serie A', 'slug': 'italy-serie-a'},
-    'italy-serie-b': {'name': 'Italia Serie B', 'slug': 'italy-serie-b'},
-    'france-ligue-1': {'name': 'Francia Ligue 1', 'slug': 'france-ligue-1'},
-    'france-ligue-2': {'name': 'Francia Ligue 2', 'slug': 'france-ligue-2'},
-    'spain-la-liga': {'name': 'Spagna La Liga', 'slug': 'spain-la-liga'},
-    'spain-segunda': {'name': 'Spagna Segunda División', 'slug': 'spain-segunda-division'},
-    'germany-bundesliga': {'name': 'Germania Bundesliga', 'slug': 'germany-bundesliga'},
-    'germany-2-bundesliga': {'name': 'Germania 2. Bundesliga', 'slug': 'germany-2-bundesliga'},
-    'england-premier-league': {'name': 'Inghilterra Premier League', 'slug': 'england-premier-league'},
-    'england-championship': {'name': 'Inghilterra Championship', 'slug': 'england-championship'},
-    'england-league-one': {'name': 'Inghilterra League 1', 'slug': 'england-league-one'},
-    'england-league-two': {'name': 'Inghilterra League 2', 'slug': 'england-league-two'},
+    # Leghe principali europee (tournament_id da verificare con API)
+    'italy-serie-a': {'name': 'Serie A', 'slug': 'italy-serie-a', 'country': 'Italy', 'keywords': ['serie a', 'serie-a']},
+    'italy-serie-b': {'name': 'Serie B', 'slug': 'italy-serie-b', 'country': 'Italy', 'keywords': ['serie b', 'serie-b']},
+    'france-ligue-1': {'name': 'Ligue 1', 'slug': 'france-ligue-1', 'country': 'France', 'keywords': ['ligue 1', 'ligue-1']},
+    'france-ligue-2': {'name': 'Ligue 2', 'slug': 'france-ligue-2', 'country': 'France', 'keywords': ['ligue 2', 'ligue-2']},
+    'spain-la-liga': {'name': 'La Liga', 'slug': 'spain-la-liga', 'country': 'Spain', 'keywords': ['la liga', 'la-liga']},
+    'spain-segunda': {'name': 'Segunda División', 'slug': 'spain-segunda-division', 'country': 'Spain', 'keywords': ['segunda', 'segunda division']},
+    'germany-bundesliga': {'name': 'Bundesliga', 'slug': 'germany-bundesliga', 'country': 'Germany', 'keywords': ['bundesliga']},
+    'germany-2-bundesliga': {'name': '2. Bundesliga', 'slug': 'germany-2-bundesliga', 'country': 'Germany', 'keywords': ['2. bundesliga', '2 bundesliga']},
+    'england-premier-league': {'name': 'Premier League', 'slug': 'england-premier-league', 'country': 'England', 'keywords': ['premier league', 'premier-league']},
+    'england-championship': {'name': 'Championship', 'slug': 'england-championship', 'country': 'England', 'keywords': ['championship']},
+    'england-league-one': {'name': 'League One', 'slug': 'england-league-one', 'country': 'England', 'keywords': ['league one', 'league-1']},
+    'england-league-two': {'name': 'League Two', 'slug': 'england-league-two', 'country': 'England', 'keywords': ['league two', 'league-2']},
+    'netherlands': {'name': 'Eredivisie', 'slug': 'netherlands', 'country': 'Netherlands', 'keywords': ['eredivisie', 'netherlands']},
+    # Altre leghe
+    'switzerland': {'name': 'Super League', 'slug': 'switzerland', 'country': 'Switzerland', 'keywords': ['super league', 'switzerland']},
+    'estonia': {'name': 'Meistriliiga', 'slug': 'estonia', 'country': 'Estonia', 'keywords': ['estonia', 'meistriliiga']},
+    'hong-kong': {'name': 'Premier League', 'slug': 'hong-kong', 'country': 'Hong Kong', 'keywords': ['hong kong', 'hong-kong']},
+    'luxembourg': {'name': 'National Division', 'slug': 'luxembourg', 'country': 'Luxembourg', 'keywords': ['luxembourg']},
+    'qatar': {'name': 'Stars League', 'slug': 'qatar', 'country': 'Qatar', 'keywords': ['qatar']},
+    'singapore': {'name': 'Premier League', 'slug': 'singapore', 'country': 'Singapore', 'keywords': ['singapore']},
+    'vietnam': {'name': 'V.League 1', 'slug': 'vietnam', 'country': 'Vietnam', 'keywords': ['vietnam', 'v.league']},
+    'norway-elite': {'name': 'Eliteserien', 'slug': 'norway-elite', 'country': 'Norway', 'keywords': ['eliteserien', 'norway elite']},
+    'norway-obos': {'name': 'OBOS-ligaen', 'slug': 'norway-obos', 'country': 'Norway', 'keywords': ['obos', 'norway obos']},
+    'iceland-urva': {'name': 'Úrvalsdeild', 'slug': 'iceland-urva', 'country': 'Iceland', 'keywords': ['urvalsdeild', 'iceland urva']},
+    'iceland-incasso': {'name': '1. deild karla', 'slug': 'iceland-incasso', 'country': 'Iceland', 'keywords': ['1. deild', 'iceland incasso']},
 }
 
 # Configurazione logging
@@ -267,16 +271,73 @@ class MatchMonitor:
             self.sent_matches: Set[int] = set(sent_data.keys() if isinstance(sent_data, dict) else [])
         
         self.active_matches: Dict[int, Dict] = load_json_file(ACTIVE_MATCHES_FILE, {})
-        self.monitored_leagues: Set[str] = set(load_json_file(LEAGUES_FILE, {}).get('leagues', []))
         
-        # Se non ci sono leghe configurate, usa quelle iniziali
-        if not self.monitored_leagues:
-            self.monitored_leagues = set(INITIAL_LEAGUES.keys())
+        # Carica leghe monitorate (nuovo formato con dettagli)
+        leagues_data = load_json_file(LEAGUES_FILE, {})
+        if isinstance(leagues_data, dict) and 'monitored' in leagues_data:
+            # Nuovo formato: dict con 'monitored' che contiene lista di dict con dettagli
+            self.monitored_leagues: List[Dict] = leagues_data.get('monitored', [])
+        elif isinstance(leagues_data, dict) and 'leagues' in leagues_data:
+            # Vecchio formato: lista di ID/stringhe
+            old_leagues = leagues_data.get('leagues', [])
+            # Converti in nuovo formato
+            self.monitored_leagues = []
+            for league_id in old_leagues:
+                if league_id in INITIAL_LEAGUES:
+                    self.monitored_leagues.append({
+                        'id': league_id,
+                        'name': INITIAL_LEAGUES[league_id]['name'],
+                        'slug': INITIAL_LEAGUES[league_id].get('slug', ''),
+                        'country': INITIAL_LEAGUES[league_id].get('country', ''),
+                        'tournament_id': None  # Da aggiornare quando disponibile
+                    })
+        else:
+            # Nessuna configurazione: usa leghe iniziali
+            self.monitored_leagues = []
+            for league_id, league_info in INITIAL_LEAGUES.items():
+                self.monitored_leagues.append({
+                    'id': league_id,
+                    'name': league_info['name'],
+                    'slug': league_info.get('slug', ''),
+                    'country': league_info.get('country', ''),
+                    'tournament_id': None
+                })
             self.save_leagues()
     
     def save_leagues(self):
-        """Salva leghe monitorate"""
-        save_json_file(LEAGUES_FILE, {'leagues': list(self.monitored_leagues)})
+        """Salva leghe monitorate in formato strutturato"""
+        save_json_file(LEAGUES_FILE, {
+            'monitored': self.monitored_leagues,
+            'last_updated': datetime.now().isoformat()
+        })
+    
+    def get_monitored_tournament_ids(self) -> Set[int]:
+        """Restituisce set di tournament_id monitorati"""
+        ids = set()
+        for league in self.monitored_leagues:
+            tournament_id = league.get('tournament_id')
+            if tournament_id:
+                ids.add(tournament_id)
+        return ids
+    
+    def get_monitored_slugs(self) -> Set[str]:
+        """Restituisce set di slug monitorati"""
+        slugs = set()
+        for league in self.monitored_leagues:
+            slug = league.get('slug', '').lower()
+            if slug:
+                slugs.add(slug)
+        return slugs
+    
+    def get_monitored_keywords(self) -> Set[str]:
+        """Restituisce set di keywords monitorate"""
+        keywords = set()
+        for league in self.monitored_leagues:
+            league_id = league.get('id', '')
+            if league_id in INITIAL_LEAGUES:
+                for kw in INITIAL_LEAGUES[league_id].get('keywords', []):
+                    keywords.add(kw.lower())
+        return keywords
     
     def is_match_0_0_first_half(self, match: Dict) -> bool:
         """Verifica se partita è 0-0 al primo tempo"""
@@ -345,51 +406,62 @@ class MatchMonitor:
             return False
     
     def get_league_info_from_match(self, match: Dict) -> tuple:
-        """Estrae informazioni lega da match (slug, nome, id)"""
+        """Estrae informazioni lega da match (slug, nome, tournament_id)"""
         try:
             tournament = match.get('tournament', {})
             unique_tournament = tournament.get('uniqueTournament', {})
-            slug = unique_tournament.get('slug', '').lower()
-            name = unique_tournament.get('name', '').lower()
-            tournament_id = unique_tournament.get('id')
+            slug = unique_tournament.get('slug', '').lower() if unique_tournament else ''
+            name = unique_tournament.get('name', '').lower() if unique_tournament else ''
+            tournament_id = unique_tournament.get('id') if unique_tournament else None
             return (slug, name, tournament_id)
         except:
             return (None, None, None)
     
     def is_league_monitored(self, match: Dict) -> bool:
-        """Verifica se la lega della partita è monitorata"""
+        """Verifica se la lega della partita è monitorata usando tournament_id, slug o keywords"""
         slug, name, tournament_id = self.get_league_info_from_match(match)
-        if not slug and not name:
+        
+        if not slug and not name and not tournament_id:
             return False
         
-        # Controlla se lo slug o il nome corrispondono a una lega monitorata
-        for league_id, league_info in INITIAL_LEAGUES.items():
-            if league_id in self.monitored_leagues:
-                league_slug = league_info['slug'].lower()
+        # 1. Match per tournament_id (più affidabile)
+        if tournament_id:
+            monitored_ids = self.get_monitored_tournament_ids()
+            if tournament_id in monitored_ids:
+                return True
+        
+        # 2. Match per slug
+        if slug:
+            monitored_slugs = self.get_monitored_slugs()
+            for monitored_slug in monitored_slugs:
+                if slug == monitored_slug or slug.startswith(monitored_slug) or monitored_slug in slug:
+                    return True
+        
+        # 3. Match per keywords nel nome
+        if name:
+            monitored_keywords = self.get_monitored_keywords()
+            name_lower = name.lower()
+            for keyword in monitored_keywords:
+                if keyword in name_lower:
+                    # Verifica che sia un match valido (non troppo generico)
+                    if len(keyword) > 3:  # Evita match troppo generici
+                        return True
+        
+        # 4. Match specifici per leghe note (fallback)
+        for league in self.monitored_leagues:
+            league_id = league.get('id', '')
+            if league_id in INITIAL_LEAGUES:
+                league_info = INITIAL_LEAGUES[league_id]
                 league_name = league_info['name'].lower()
                 
-                # Match per slug
-                if slug and (slug == league_slug or slug.startswith(league_slug) or league_slug in slug):
+                # Match esatto per nome
+                if name and league_name in name or name in league_name:
                     return True
                 
-                # Match per nome (parziale)
-                if name:
-                    # Controlla se il nome contiene parole chiave della lega
-                    name_keywords = league_name.split()
-                    if any(keyword in name for keyword in name_keywords if len(keyword) > 3):
-                        # Match specifici per leghe note
-                        if 'italy' in league_id and ('serie a' in name or 'serie b' in name):
-                            return True
-                        if 'france' in league_id and ('ligue 1' in name or 'ligue 2' in name):
-                            return True
-                        if 'spain' in league_id and ('la liga' in name or 'segunda' in name):
-                            return True
-                        if 'germany' in league_id and ('bundesliga' in name):
-                            return True
-                        if 'england' in league_id and ('premier' in name or 'championship' in name or 'league' in name):
-                            return True
-                        if 'netherlands' in league_id and ('eredivisie' in name):
-                            return True
+                # Match per keywords specifiche
+                for keyword in league_info.get('keywords', []):
+                    if keyword.lower() in name:
+                        return True
         
         return False
     
@@ -518,9 +590,96 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📖 Comandi disponibili:\n\n"
         "/start - Messaggio di benvenuto\n"
         "/help - Mostra questa guida\n"
-        "/addLeague - Gestisci leghe da monitorare\n\n"
+        "/addLeague - Gestisci leghe da monitorare\n"
+        "/leagues - Mostra leghe attualmente monitorate\n"
+        "/chatid - Mostra il CHAT_ID di questa chat/gruppo\n"
+        "/stats - Statistiche notifiche inviate\n"
+        "/status - Stato del bot\n\n"
         "Il bot controlla automaticamente le partite ogni 60 secondi e "
         "ti invia una notifica quando rileva una partita 0-0 al primo tempo."
+    )
+    await update.message.reply_text(message)
+
+
+async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /chatid - mostra CHAT_ID della chat corrente"""
+    chat = update.effective_chat
+    chat_id = chat.id
+    chat_type = chat.type
+    
+    if chat_type == 'private':
+        message = f"📱 CHAT_ID (Chat Privata):\n`{chat_id}`\n\nCopia questo valore nella variabile d'ambiente CHAT_ID"
+    elif chat_type == 'group' or chat_type == 'supergroup':
+        message = (
+            f"👥 CHAT_ID (Gruppo):\n`{chat_id}`\n\n"
+            f"⚠️ Nota: I CHAT_ID dei gruppi sono numeri negativi.\n"
+            f"Copia questo valore nella variabile d'ambiente CHAT_ID.\n\n"
+            f"Tipo: {chat_type}\n"
+            f"Nome gruppo: {chat.title if hasattr(chat, 'title') else 'N/A'}"
+        )
+    else:
+        message = f"CHAT_ID: `{chat_id}`\nTipo: {chat_type}"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def leagues_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /leagues - mostra leghe monitorate"""
+    monitor = context.bot_data.get('monitor')
+    if not monitor:
+        await update.message.reply_text("❌ Errore: monitor non inizializzato.")
+        return
+    
+    if not monitor.monitored_leagues:
+        await update.message.reply_text("📋 Nessuna lega configurata. Usa /addLeague per aggiungere leghe.")
+        return
+    
+    lines = [f"📋 Leghe monitorate ({len(monitor.monitored_leagues)}):\n"]
+    
+    for i, league in enumerate(monitor.monitored_leagues, 1):
+        name = league.get('name', 'N/A')
+        country = league.get('country', '')
+        tournament_id = league.get('tournament_id')
+        
+        country_str = f" ({country})" if country else ""
+        id_str = f" [ID: {tournament_id}]" if tournament_id else ""
+        
+        lines.append(f"{i}. {name}{country_str}{id_str}")
+    
+    await update.message.reply_text("\n".join(lines))
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /stats - mostra statistiche"""
+    monitor = context.bot_data.get('monitor')
+    if not monitor:
+        await update.message.reply_text("❌ Errore: monitor non inizializzato.")
+        return
+    
+    total_sent = len(monitor.sent_matches)
+    active_tracking = len(monitor.active_matches)
+    monitored_leagues = len(monitor.monitored_leagues)
+    
+    message = (
+        f"📊 Statistiche Bot:\n\n"
+        f"✅ Notifiche inviate: {total_sent}\n"
+        f"🔍 Partite in tracking: {active_tracking}\n"
+        f"📋 Leghe monitorate: {monitored_leagues}\n"
+        f"⏱️ Intervallo controllo: {POLL_INTERVAL} secondi"
+    )
+    
+    await update.message.reply_text(message)
+
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /status - mostra stato del bot"""
+    message = (
+        f"🤖 Stato Bot:\n\n"
+        f"✅ Bot attivo e funzionante\n"
+        f"⏱️ Controlla partite ogni {POLL_INTERVAL} secondi\n"
+        f"🌐 HTTP server: Porta {PORT}\n"
+        f"📡 API SofaScore: {SOFASCORE_BASE}\n\n"
+        f"Usa /help per vedere tutti i comandi disponibili."
     )
     await update.message.reply_text(message)
 
@@ -658,6 +817,10 @@ async def main():
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("addLeague", add_league_command))
+    application.add_handler(CommandHandler("leagues", leagues_command))
+    application.add_handler(CommandHandler("chatid", chatid_command))
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CallbackQueryHandler(callback_handler))
     
     # Avvia HTTP server in thread separato

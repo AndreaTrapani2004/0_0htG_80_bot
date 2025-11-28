@@ -32,12 +32,13 @@ PORT=8080
 SOFASCORE_PROXY_BASE=https://api.sofascore.com/api/v1
 ```
 
-**Come ottenere i valori:**
-- **TELEGRAM_TOKEN**: Crea un bot tramite [@BotFather](https://t.me/botfather) su Telegram
-- **CHAT_ID**: 
-  1. Invia un messaggio al bot
-  2. Visita: `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates`
-  3. Cerca `"chat":{"id":...}` nel JSON
+**📖 Guida dettagliata**: Vedi il file [ENV_SETUP.md](ENV_SETUP.md) per istruzioni passo-passo complete.
+
+**Quick reference:**
+- **TELEGRAM_TOKEN**: Ottienilo da [@BotFather](https://t.me/botfather) con `/newbot`
+- **CHAT_ID**: Per gruppi è un numero negativo (es. `-1001234567890`). Ottienilo da `https://api.telegram.org/bot<TOKEN>/getUpdates` o usa `/chatid` nel gruppo dopo la configurazione
+- **PORT**: Lascia `8080` (default)
+- **SOFASCORE_PROXY_BASE**: Lascia `https://api.sofascore.com/api/v1` (default)
 
 ### 4. Deploy
 
