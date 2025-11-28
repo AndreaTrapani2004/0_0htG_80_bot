@@ -2,6 +2,7 @@ services:
   - type: web
     name: 0-0htg-80-bot
     env: python
+    runtime: python-3.11
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     envVars:
