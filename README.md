@@ -44,15 +44,14 @@ python bot.py
 
 ## Deploy su Render.com
 
+Per istruzioni dettagliate sul deploy su Render.com e configurazione del keep-alive, consulta il file [DEPLOY.md](DEPLOY.md).
+
+**Quick start:**
 1. Crea un nuovo Web Service su Render.com
-2. Connetti il repository GitHub
-3. Imposta le variabili d'ambiente:
-   - `TELEGRAM_TOKEN`
-   - `CHAT_ID`
-   - `PORT` (opzionale, default 8080)
-   - `SOFASCORE_PROXY_BASE` (opzionale)
-4. Imposta il comando di avvio: `python bot.py`
-5. Il bot si avvierà automaticamente e l'HTTP server manterrà il servizio attivo
+2. Connetti il repository GitHub: `https://github.com/AndreaTrapani2004/0_0htG_80_bot`
+3. Imposta le variabili d'ambiente (vedi DEPLOY.md)
+4. Il bot si avvierà automaticamente
+5. **IMPORTANTE**: Configura un servizio di ping (cron-job.org, UptimeRobot, ecc.) per mantenere il servizio attivo ogni 5 minuti
 
 ## Comandi Telegram
 
