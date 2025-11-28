@@ -17,6 +17,7 @@ import requests
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.error import Conflict, NetworkError
 
 # Carica variabili d'ambiente
 load_dotenv()
@@ -882,6 +883,24 @@ def main():
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CallbackQueryHandler(callback_handler))
+    
+    # Gestione errori (ignora Conflict e NetworkError)
+    def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Gestisce errori durante l'elaborazione degli update"""
+        error = context.error
+        if isinstance(error, Conflict):
+            # Ignora silenziosamente errori Conflict (più istanze in esecuzione)
+            logger.debug(f"Conflict ignorato: {error}")
+            return
+        elif isinstance(error, NetworkError):
+            # Ignora silenziosamente errori di rete temporanei
+            logger.debug(f"NetworkError ignorato: {error}")
+            return
+        else:
+            # Log altri errori
+            logger.error(f"Errore durante elaborazione update: {error}", exc_info=error)
+    
+    application.add_error_handler(error_handler)
     
     # Avvia HTTP server in thread separato
     http_thread = threading.Thread(target=start_http_server, args=(PORT,), daemon=True)
