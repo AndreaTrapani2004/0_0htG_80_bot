@@ -1038,7 +1038,7 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             )
             return
         
-        # Step 2: nome lega
+        # Step 2: nome lega - cerca su SofaScore
         if state == 'await_league':
             league_input = text
             league_norm = normalize_league_name(league_input)
@@ -1055,44 +1055,209 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             country_input = country_data['input']
             country_norm = country_data['norm']
             
-            # Crea ID unico
-            country_id = country_norm.replace(' ', '_')
-            league_id_part = league_norm.replace(' ', '_')
-            league_id = f"{country_id}-{league_id_part}"
+            # Cerca leghe su SofaScore che corrispondono
+            await update.message.reply_text("🔍 Cerco leghe su SofaScore...")
             
-            # Verifica se già esiste
-            for league in monitor.monitored_leagues:
-                if league.get('id') == league_id:
+            try:
+                # Recupera tutti i tornei disponibili
+                tournaments = monitor.api.get_tournaments()
+                if not tournaments:
                     await update.message.reply_text(
-                        "ℹ️ Questa lega è già presente nella lista monitorata.\n"
-                        f"Stato: {country_input} → {country_norm}\n"
-                        f"Lega: {league_input} → {league_norm}"
+                        "❌ Impossibile recuperare le leghe da SofaScore.\n"
+                        "Prova ad aggiungere manualmente con il formato: Stato - Nome Lega"
                     )
                     context.user_data.pop('add_league_state', None)
                     context.user_data.pop('add_league_country', None)
                     return
-            
-            # Aggiungi lega
-            monitor.monitored_leagues.append({
-                'id': league_id,
-                'country_input': country_input,
-                'league_input': league_input,
-                'country_norm': country_norm,
-                'league_norm': league_norm,
-                'tournament_id': None
-            })
-            monitor.save_leagues()
-            
-            context.user_data.pop('add_league_state', None)
-            context.user_data.pop('add_league_country', None)
-            
-            await update.message.reply_text(
-                "✅ Lega aggiunta alla lista monitorata!\n\n"
-                f"Stato: {country_input} → {country_norm}\n"
-                f"Lega: {league_input} → {league_norm}\n\n"
-                "Il bot inizierà a monitorare le partite 0-0 al primo tempo in questa lega."
-            )
-            return
+                
+                # Filtra tornei che corrispondono al paese e al nome lega
+                matching_tournaments = []
+                for tournament in tournaments:
+                    # Estrai informazioni
+                    tournament_name = tournament.get('name', '').lower()
+                    slug = tournament.get('slug', '').lower()
+                    category = tournament.get('category', {})
+                    country = category.get('name', '').lower() if isinstance(category, dict) else ''
+                    tournament_id = tournament.get('id')
+                    
+                    # Verifica match con paese
+                    country_match = (
+                        country_norm in country or 
+                        country in country_norm or
+                        country_norm in slug or
+                        slug.startswith(country_norm.replace(' ', '-'))
+                    )
+                    
+                    # Verifica match con nome lega
+                    league_match = (
+                        league_norm in tournament_name or
+                        tournament_name in league_norm or
+                        league_norm in slug or
+                        slug.endswith(league_norm.replace(' ', '-'))
+                    )
+                    
+                    if country_match and league_match:
+                        matching_tournaments.append({
+                            'id': tournament_id,
+                            'name': tournament.get('name', 'N/A'),
+                            'slug': slug,
+                            'country': category.get('name', 'N/A') if isinstance(category, dict) else 'N/A',
+                            'full_name': f"{tournament.get('name', 'N/A')} - {category.get('name', 'N/A') if isinstance(category, dict) else 'N/A'}"
+                        })
+                
+                if not matching_tournaments:
+                    # Nessuna corrispondenza trovata, aggiungi comunque manualmente
+                    country_id = country_norm.replace(' ', '_')
+                    league_id_part = league_norm.replace(' ', '_')
+                    league_id = f"{country_id}-{league_id_part}"
+                    
+                    # Verifica se già esiste
+                    for league in monitor.monitored_leagues:
+                        if league.get('id') == league_id:
+                            await update.message.reply_text(
+                                "ℹ️ Questa lega è già presente nella lista monitorata.\n"
+                                f"Stato: {country_input} → {country_norm}\n"
+                                f"Lega: {league_input} → {league_norm}"
+                            )
+                            context.user_data.pop('add_league_state', None)
+                            context.user_data.pop('add_league_country', None)
+                            return
+                    
+                    # Aggiungi manualmente
+                    monitor.monitored_leagues.append({
+                        'id': league_id,
+                        'country_input': country_input,
+                        'league_input': league_input,
+                        'country_norm': country_norm,
+                        'league_norm': league_norm,
+                        'tournament_id': None
+                    })
+                    monitor.save_leagues()
+                    
+                    context.user_data.pop('add_league_state', None)
+                    context.user_data.pop('add_league_country', None)
+                    
+                    await update.message.reply_text(
+                        "✅ Lega aggiunta alla lista monitorata!\n\n"
+                        f"Stato: {country_input} → {country_norm}\n"
+                        f"Lega: {league_input} → {league_norm}\n\n"
+                        "⚠️ Nota: Nessuna corrispondenza esatta trovata su SofaScore.\n"
+                        "La lega verrà monitorata quando corrisponderà ai nomi."
+                    )
+                    return
+                
+                # Mostra leghe trovate con checkbox per selezione
+                if len(matching_tournaments) == 1:
+                    # Una sola corrispondenza, aggiungi direttamente
+                    tournament = matching_tournaments[0]
+                    tournament_id = tournament['id']
+                    league_id = f"{country_norm.replace(' ', '_')}-{league_norm.replace(' ', '_')}"
+                    
+                    # Verifica se già esiste
+                    exists = False
+                    for league in monitor.monitored_leagues:
+                        if league.get('tournament_id') == tournament_id or league.get('id') == league_id:
+                            exists = True
+                            break
+                    
+                    if exists:
+                        await update.message.reply_text(
+                            "ℹ️ Questa lega è già presente nella lista monitorata.\n"
+                            f"Lega: {tournament['full_name']}"
+                        )
+                    else:
+                        monitor.monitored_leagues.append({
+                            'id': league_id,
+                            'country_input': country_input,
+                            'league_input': tournament['name'],
+                            'country_norm': country_norm,
+                            'league_norm': normalize_league_name(tournament['name']),
+                            'tournament_id': tournament_id
+                        })
+                        monitor.save_leagues()
+                        
+                        await update.message.reply_text(
+                            f"✅ Lega aggiunta: {tournament['full_name']}\n\n"
+                            f"Tournament ID: {tournament_id}\n"
+                            "Il bot inizierà a monitorare le partite 0-0 al primo tempo in questa lega."
+                        )
+                    
+                    context.user_data.pop('add_league_state', None)
+                    context.user_data.pop('add_league_country', None)
+                    return
+                
+                # Più corrispondenze: mostra checkbox per selezione
+                context.user_data['add_league_matches'] = matching_tournaments
+                context.user_data['add_league_state'] = 'await_selection'
+                
+                keyboard = []
+                for i, tournament in enumerate(matching_tournaments[:20]):  # Max 20 per evitare troppi pulsanti
+                    button_text = f"☐ {tournament['full_name']}"
+                    if len(button_text) > 60:
+                        button_text = button_text[:57] + "..."
+                    keyboard.append([InlineKeyboardButton(
+                        button_text,
+                        callback_data=f"add_league_select_{i}"
+                    )])
+                
+                keyboard.append([InlineKeyboardButton(
+                    "✅ Salva leghe selezionate",
+                    callback_data="add_league_save"
+                )])
+                keyboard.append([InlineKeyboardButton(
+                    "❌ Annulla",
+                    callback_data="add_league_cancel"
+                )])
+                
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                await update.message.reply_text(
+                    f"🔍 Trovate {len(matching_tournaments)} leghe corrispondenti:\n\n"
+                    "Seleziona le leghe da aggiungere:",
+                    reply_markup=reply_markup
+                )
+                return
+                
+            except Exception as e:
+                logger.error(f"Errore ricerca leghe SofaScore: {e}", exc_info=True)
+                # Fallback: aggiungi manualmente
+                country_id = country_norm.replace(' ', '_')
+                league_id_part = league_norm.replace(' ', '_')
+                league_id = f"{country_id}-{league_id_part}"
+                
+                # Verifica se già esiste
+                for league in monitor.monitored_leagues:
+                    if league.get('id') == league_id:
+                        await update.message.reply_text(
+                            "ℹ️ Questa lega è già presente nella lista monitorata.\n"
+                            f"Stato: {country_input} → {country_norm}\n"
+                            f"Lega: {league_input} → {league_norm}"
+                        )
+                        context.user_data.pop('add_league_state', None)
+                        context.user_data.pop('add_league_country', None)
+                        return
+                
+                # Aggiungi manualmente
+                monitor.monitored_leagues.append({
+                    'id': league_id,
+                    'country_input': country_input,
+                    'league_input': league_input,
+                    'country_norm': country_norm,
+                    'league_norm': league_norm,
+                    'tournament_id': None
+                })
+                monitor.save_leagues()
+                
+                context.user_data.pop('add_league_state', None)
+                context.user_data.pop('add_league_country', None)
+                
+                await update.message.reply_text(
+                    "✅ Lega aggiunta alla lista monitorata!\n\n"
+                    f"Stato: {country_input} → {country_norm}\n"
+                    f"Lega: {league_input} → {league_norm}\n\n"
+                    "⚠️ Nota: Errore nella ricerca su SofaScore. La lega verrà monitorata quando corrisponderà ai nomi."
+                )
+                return
     except Exception as e:
         logger.error(f"Errore text_message_handler: {e}")
         await update.message.reply_text(f"❌ Errore: {e}")
@@ -1110,6 +1275,134 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         
         callback_data = query.data
+        
+        # Gestione addLeague (selezione leghe da SofaScore)
+        if callback_data.startswith("add_league_"):
+            # Inizializza set selezioni se non esiste
+            if 'add_league_selected' not in context.user_data:
+                context.user_data['add_league_selected'] = set()
+            
+            selected_indices = context.user_data['add_league_selected']
+            matches = context.user_data.get('add_league_matches', [])
+            
+            # Toggle selezione lega
+            if callback_data.startswith("add_league_select_"):
+                try:
+                    index = int(callback_data.split("_")[-1])
+                    if 0 <= index < len(matches):
+                        if index in selected_indices:
+                            selected_indices.remove(index)
+                        else:
+                            selected_indices.add(index)
+                        
+                        # Ricrea keyboard aggiornata
+                        keyboard = []
+                        for i, tournament in enumerate(matches[:20]):
+                            checkbox = "☑" if i in selected_indices else "☐"
+                            button_text = f"{checkbox} {tournament['full_name']}"
+                            if len(button_text) > 60:
+                                button_text = button_text[:57] + "..."
+                            keyboard.append([InlineKeyboardButton(
+                                button_text,
+                                callback_data=f"add_league_select_{i}"
+                            )])
+                        
+                        if selected_indices:
+                            keyboard.append([InlineKeyboardButton(
+                                "✅ Salva leghe selezionate",
+                                callback_data="add_league_save"
+                            )])
+                        
+                        keyboard.append([InlineKeyboardButton(
+                            "❌ Annulla",
+                            callback_data="add_league_cancel"
+                        )])
+                        
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        message = (
+                            f"🔍 Trovate {len(matches)} leghe corrispondenti:\n\n"
+                            f"Leghe selezionate: {len(selected_indices)}/{len(matches)}\n\n"
+                            "Seleziona le leghe da aggiungere:"
+                        )
+                        
+                        await query.edit_message_text(message, reply_markup=reply_markup)
+                except (ValueError, IndexError) as e:
+                    await query.answer("❌ Errore: indice non valido", show_alert=True)
+            
+            # Salva leghe selezionate
+            elif callback_data == "add_league_save":
+                if not selected_indices:
+                    await query.answer("⚠️ Nessuna lega selezionata", show_alert=True)
+                    return
+                
+                country_data = context.user_data.get('add_league_country', {})
+                country_input = country_data.get('input', '')
+                country_norm = country_data.get('norm', '')
+                
+                added = []
+                skipped = []
+                
+                for idx in selected_indices:
+                    if 0 <= idx < len(matches):
+                        tournament = matches[idx]
+                        tournament_id = tournament['id']
+                        league_name = tournament['name']
+                        league_norm = normalize_league_name(league_name)
+                        league_id = f"{country_norm.replace(' ', '_')}-{league_norm.replace(' ', '_')}"
+                        
+                        # Verifica se già esiste
+                        exists = False
+                        for league in monitor.monitored_leagues:
+                            if league.get('tournament_id') == tournament_id or league.get('id') == league_id:
+                                exists = True
+                                skipped.append(tournament['full_name'])
+                                break
+                        
+                        if not exists:
+                            monitor.monitored_leagues.append({
+                                'id': league_id,
+                                'country_input': country_input,
+                                'league_input': league_name,
+                                'country_norm': country_norm,
+                                'league_norm': league_norm,
+                                'tournament_id': tournament_id
+                            })
+                            added.append(tournament['full_name'])
+                
+                if added:
+                    monitor.save_leagues()
+                
+                # Messaggio risultato
+                result_lines = []
+                if added:
+                    result_lines.append(f"✅ Leghe aggiunte ({len(added)}):")
+                    for name in added:
+                        result_lines.append(f"• {name}")
+                
+                if skipped:
+                    result_lines.append(f"\n⚠️ Già presenti ({len(skipped)}):")
+                    for name in skipped[:5]:
+                        result_lines.append(f"• {name}")
+                    if len(skipped) > 5:
+                        result_lines.append(f"• ... e altre {len(skipped) - 5}")
+                
+                await query.edit_message_text("\n".join(result_lines))
+                
+                # Pulisci stato
+                context.user_data.pop('add_league_state', None)
+                context.user_data.pop('add_league_country', None)
+                context.user_data.pop('add_league_matches', None)
+                context.user_data.pop('add_league_selected', None)
+            
+            # Annulla operazione
+            elif callback_data == "add_league_cancel":
+                context.user_data.pop('add_league_state', None)
+                context.user_data.pop('add_league_country', None)
+                context.user_data.pop('add_league_matches', None)
+                context.user_data.pop('add_league_selected', None)
+                await query.edit_message_text("❌ Operazione annullata.")
+            
+            return
         
         # Gestione deleteLeague
         if callback_data.startswith("delete_league_"):
