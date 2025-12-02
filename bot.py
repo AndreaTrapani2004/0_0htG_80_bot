@@ -935,7 +935,7 @@ async def add_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def delete_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler comando /deleteLeague - mostra lista leghe da rimuovere"""
+    """Handler comando /deleteLeague - mostra lista con checkbox per rimuovere leghe"""
     try:
         monitor = context.bot_data.get('monitor')
         if not monitor:
@@ -946,18 +946,53 @@ async def delete_league_command(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("📋 Nessuna lega configurata da rimuovere.")
             return
         
-        # Mostra lista numerata
-        lines = ["📋 Leghe monitorate (invia il numero per rimuoverle):\n"]
+        # Inizializza set delle leghe selezionate per la rimozione
+        if 'delete_league_selected' not in context.user_data:
+            context.user_data['delete_league_selected'] = set()
         
-        for i, league in enumerate(monitor.monitored_leagues, 1):
+        # Crea keyboard con checkbox
+        keyboard = []
+        selected_indices = context.user_data['delete_league_selected']
+        
+        for i, league in enumerate(monitor.monitored_leagues):
             country_in = league.get('country_input', league.get('country', ''))
             league_in = league.get('league_input', league.get('name', 'N/A'))
-            lines.append(f"{i}. {league_in} - {country_in}")
+            
+            # Checkbox: ☑ se selezionata, ☐ se non selezionata
+            checkbox = "☑" if i in selected_indices else "☐"
+            button_text = f"{checkbox} {league_in} - {country_in}"
+            
+            # Limita lunghezza testo pulsante (max 64 caratteri per Telegram)
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
+            
+            keyboard.append([InlineKeyboardButton(
+                button_text,
+                callback_data=f"delete_league_toggle_{i}"
+            )])
         
-        lines.append("\n💡 Invia il numero (es. 2) o più numeri separati da virgola (es. 1,3,5)")
+        # Pulsante Salva (solo se ci sono leghe selezionate)
+        if selected_indices:
+            keyboard.append([InlineKeyboardButton(
+                "✅ Salva e rimuovi leghe selezionate",
+                callback_data="delete_league_save"
+            )])
         
-        context.user_data['delete_league_state'] = True
-        await update.message.reply_text("\n".join(lines))
+        # Pulsante Annulla
+        keyboard.append([InlineKeyboardButton(
+            "❌ Annulla",
+            callback_data="delete_league_cancel"
+        )])
+        
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        message = (
+            "📋 Seleziona le leghe da rimuovere:\n\n"
+            f"Leghe selezionate: {len(selected_indices)}/{len(monitor.monitored_leagues)}\n\n"
+            "Clicca sulle checkbox per selezionare/deselezionare, poi clicca 'Salva'."
+        )
+        
+        await update.message.reply_text(message, reply_markup=reply_markup)
         
     except Exception as e:
         logger.error(f"Errore comando deleteLeague: {e}")
@@ -1109,13 +1144,102 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Errore: monitor non inizializzato.")
             return
         
-        # Per ora non ci sono callback specifici per deleteLeague;
-        # il supporto per checkbox di cancellazione può essere aggiunto qui in futuro.
+        callback_data = query.data
+        
+        # Gestione deleteLeague
+        if callback_data.startswith("delete_league_"):
+            # Inizializza set selezioni se non esiste
+            if 'delete_league_selected' not in context.user_data:
+                context.user_data['delete_league_selected'] = set()
+            
+            selected_indices = context.user_data['delete_league_selected']
+            
+            # Toggle checkbox
+            if callback_data.startswith("delete_league_toggle_"):
+                try:
+                    index = int(callback_data.split("_")[-1])
+                    if index in selected_indices:
+                        selected_indices.remove(index)
+                    else:
+                        selected_indices.add(index)
+                    
+                    # Ricrea la keyboard aggiornata
+                    keyboard = []
+                    for i, league in enumerate(monitor.monitored_leagues):
+                        country_in = league.get('country_input', league.get('country', ''))
+                        league_in = league.get('league_input', league.get('name', 'N/A'))
+                        
+                        checkbox = "☑" if i in selected_indices else "☐"
+                        button_text = f"{checkbox} {league_in} - {country_in}"
+                        
+                        if len(button_text) > 60:
+                            button_text = button_text[:57] + "..."
+                        
+                        keyboard.append([InlineKeyboardButton(
+                            button_text,
+                            callback_data=f"delete_league_toggle_{i}"
+                        )])
+                    
+                    if selected_indices:
+                        keyboard.append([InlineKeyboardButton(
+                            "✅ Salva e rimuovi leghe selezionate",
+                            callback_data="delete_league_save"
+                        )])
+                    
+                    keyboard.append([InlineKeyboardButton(
+                        "❌ Annulla",
+                        callback_data="delete_league_cancel"
+                    )])
+                    
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    message = (
+                        "📋 Seleziona le leghe da rimuovere:\n\n"
+                        f"Leghe selezionate: {len(selected_indices)}/{len(monitor.monitored_leagues)}\n\n"
+                        "Clicca sulle checkbox per selezionare/deselezionare, poi clicca 'Salva'."
+                    )
+                    
+                    await query.edit_message_text(message, reply_markup=reply_markup)
+                except (ValueError, IndexError) as e:
+                    await query.answer("❌ Errore: indice non valido", show_alert=True)
+            
+            # Salva e rimuovi leghe selezionate
+            elif callback_data == "delete_league_save":
+                if not selected_indices:
+                    await query.answer("⚠️ Nessuna lega selezionata", show_alert=True)
+                    return
+                
+                # Rimuovi leghe (in ordine inverso per non alterare gli indici)
+                removed = []
+                for idx in sorted(selected_indices, reverse=True):
+                    if 0 <= idx < len(monitor.monitored_leagues):
+                        league = monitor.monitored_leagues.pop(idx)
+                        removed.append(f"{league.get('league_input', 'N/A')} - {league.get('country_input', 'N/A')}")
+                
+                monitor.save_leagues()
+                context.user_data.pop('delete_league_selected', None)
+                
+                removed_text = "\n".join([f"• {name}" for name in removed])
+                await query.edit_message_text(
+                    f"✅ Leghe rimosse con successo!\n\n{removed_text}\n\n"
+                    f"Rimangono {len(monitor.monitored_leagues)} leghe monitorate."
+                )
+            
+            # Annulla operazione
+            elif callback_data == "delete_league_cancel":
+                context.user_data.pop('delete_league_selected', None)
+                await query.edit_message_text("❌ Operazione annullata.")
+            
+            return
+        
+        # Altri callback non gestiti
         await query.answer("⚠️ Nessuna azione associata a questo pulsante.", show_alert=True)
     
     except Exception as e:
-        logger.error(f"Errore callback handler: {e}")
-        await query.edit_message_text(f"❌ Errore: {e}")
+        logger.error(f"Errore callback handler: {e}", exc_info=True)
+        try:
+            await query.edit_message_text(f"❌ Errore: {e}")
+        except:
+            await query.answer(f"❌ Errore: {e}", show_alert=True)
 
 
 def start_http_server(port: int):
