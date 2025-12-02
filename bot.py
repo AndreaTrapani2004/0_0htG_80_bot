@@ -751,7 +751,6 @@ async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(
                 chat_id=CHAT_ID,
                 text=f"🧪 Messaggio di test dal bot!\n\nSe vedi questo messaggio, la CHAT_ID è corretta.\n\nCHAT_ID: `{CHAT_ID}`",
-                parse_mode='Markdown'
             )
             test_message += "\n\n✅ Messaggio inviato anche alla CHAT_ID configurata!"
         except Exception as e:
@@ -927,9 +926,8 @@ async def add_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['add_league_state'] = 'await_country'
         context.user_data.pop('add_league_country', None)
         await update.message.reply_text(
-            "🌍 Inserisci lo **stato** della lega che vuoi aggiungere.\n"
-            "Esempi: `Italia`, `Inghilterra`, `Francia`, `Germany`...",
-            parse_mode='Markdown'
+            "🌍 Inserisci lo stato della lega che vuoi aggiungere.\n"
+            "Esempi: Italia, Inghilterra, Francia, Germany..."
         )
     except Exception as e:
         logger.error(f"Errore comando addLeague: {e}")
@@ -956,10 +954,10 @@ async def delete_league_command(update: Update, context: ContextTypes.DEFAULT_TY
             league_in = league.get('league_input', league.get('name', 'N/A'))
             lines.append(f"{i}. {league_in} - {country_in}")
         
-        lines.append("\n💡 Invia il numero (es. `2`) o più numeri separati da virgola (es. `1,3,5`)")
+        lines.append("\n💡 Invia il numero (es. 2) o più numeri separati da virgola (es. 1,3,5)")
         
         context.user_data['delete_league_state'] = True
-        await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+        await update.message.reply_text("\n".join(lines))
         
     except Exception as e:
         logger.error(f"Errore comando deleteLeague: {e}")
@@ -983,7 +981,7 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 indices = [int(x.strip()) for x in text.split(',')]
                 indices = [i for i in indices if 1 <= i <= len(monitor.monitored_leagues)]
             except ValueError:
-                await update.message.reply_text("❌ Formato non valido. Invia numeri separati da virgola (es. `1,3,5`)", parse_mode='Markdown')
+                await update.message.reply_text("❌ Formato non valido. Invia numeri separati da virgola (es. 1,3,5)")
                 return
             
             if not indices:
@@ -1034,10 +1032,9 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             }
             context.user_data['add_league_state'] = 'await_league'
             await update.message.reply_text(
-                f"✅ Stato impostato su: *{country_input}* → `{country_norm}`\n\n"
-                "Ora inserisci il **nome del campionato**.\n"
-                "Esempi: `Serie A`, `Serie B`, `Premier League`, `Ligue 1`...",
-                parse_mode='Markdown'
+                f"✅ Stato impostato su: {country_input} → {country_norm}\n\n"
+                "Ora inserisci il nome del campionato.\n"
+                "Esempi: Serie A, Serie B, Premier League, Ligue 1..."
             )
             return
         
@@ -1059,16 +1056,17 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             country_norm = country_data['norm']
             
             # Crea ID unico
-            league_id = f"{country_norm.replace(' ', '_')}-{league_norm.replace(' ', '_')}"
+            country_id = country_norm.replace(' ', '_')
+            league_id_part = league_norm.replace(' ', '_')
+            league_id = f"{country_id}-{league_id_part}"
             
             # Verifica se già esiste
             for league in monitor.monitored_leagues:
                 if league.get('id') == league_id:
                     await update.message.reply_text(
                         "ℹ️ Questa lega è già presente nella lista monitorata.\n"
-                        f"Stato: *{country_input}* → `{country_norm}`\n"
-                        f"Lega: *{league_input}* → `{league_norm}`",
-                        parse_mode='Markdown'
+                        f"Stato: {country_input} → {country_norm}\n"
+                        f"Lega: {league_input} → {league_norm}"
                     )
                     context.user_data.pop('add_league_state', None)
                     context.user_data.pop('add_league_country', None)
@@ -1090,10 +1088,9 @@ async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             
             await update.message.reply_text(
                 "✅ Lega aggiunta alla lista monitorata!\n\n"
-                f"Stato: *{country_input}* → `{country_norm}`\n"
-                f"Lega: *{league_input}* → `{league_norm}`\n\n"
-                "Il bot inizierà a monitorare le partite 0-0 al primo tempo in questa lega.",
-                parse_mode='Markdown'
+                f"Stato: {country_input} → {country_norm}\n"
+                f"Lega: {league_input} → {league_norm}\n\n"
+                "Il bot inizierà a monitorare le partite 0-0 al primo tempo in questa lega."
             )
             return
     except Exception as e:
