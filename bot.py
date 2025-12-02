@@ -16,7 +16,7 @@ from typing import Dict, List, Set, Optional
 import requests
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.error import Conflict, NetworkError
 
 # Carica variabili d'ambiente
@@ -134,6 +134,47 @@ def save_json_file(filename: str, data: any):
             json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Errore salvataggio {filename}: {e}")
+
+
+def normalize_country_name(name: str) -> str:
+    """Normalizza nome stato (gestisce italiano -> inglese per SofaScore)"""
+    if not name:
+        return ""
+    name = name.strip().lower()
+    aliases = {
+        "italia": "italy",
+        "inghilterra": "england",
+        "francia": "france",
+        "spagna": "spain",
+        "germania": "germany",
+        "olanda": "netherlands",
+        "paesi bassi": "netherlands",
+        "svizzera": "switzerland",
+        "norvegia": "norway",
+        "islanda": "iceland",
+        "lussemburgo": "luxembourg",
+        "qatar": "qatar",
+        "singapore": "singapore",
+        "vietnam": "vietnam",
+        "estonia": "estonia",
+        "hong kong": "hong kong",
+    }
+    return aliases.get(name, name)
+
+
+def normalize_league_name(name: str) -> str:
+    """Normalizza nome lega (minuscolo, rimuove spazi extra)"""
+    if not name:
+        return ""
+    name = " ".join(name.strip().lower().split())
+    # Alcune normalizzazioni comuni
+    replacements = {
+        "serie a": "serie a",
+        "serie b": "serie b",
+        "liga 1": "ligue 1",
+        "liga 2": "ligue 2",
+    }
+    return replacements.get(name, name)
 
 
 def _fetch_sofascore_json(url: str, headers: Dict) -> Optional[Dict]:
@@ -299,31 +340,9 @@ class MatchMonitor:
         if isinstance(leagues_data, dict) and 'monitored' in leagues_data:
             # Nuovo formato: dict con 'monitored' che contiene lista di dict con dettagli
             self.monitored_leagues: List[Dict] = leagues_data.get('monitored', [])
-        elif isinstance(leagues_data, dict) and 'leagues' in leagues_data:
-            # Vecchio formato: lista di ID/stringhe
-            old_leagues = leagues_data.get('leagues', [])
-            # Converti in nuovo formato
-            self.monitored_leagues = []
-            for league_id in old_leagues:
-                if league_id in INITIAL_LEAGUES:
-                    self.monitored_leagues.append({
-                        'id': league_id,
-                        'name': INITIAL_LEAGUES[league_id]['name'],
-                        'slug': INITIAL_LEAGUES[league_id].get('slug', ''),
-                        'country': INITIAL_LEAGUES[league_id].get('country', ''),
-                        'tournament_id': None  # Da aggiornare quando disponibile
-                    })
         else:
-            # Nessuna configurazione: usa leghe iniziali
+            # Nessuna configurazione o vecchio formato: inizia con lista vuota
             self.monitored_leagues = []
-            for league_id, league_info in INITIAL_LEAGUES.items():
-                self.monitored_leagues.append({
-                    'id': league_id,
-                    'name': league_info['name'],
-                    'slug': league_info.get('slug', ''),
-                    'country': league_info.get('country', ''),
-                    'tournament_id': None
-                })
             self.save_leagues()
     
     def save_leagues(self):
@@ -341,25 +360,6 @@ class MatchMonitor:
             if tournament_id:
                 ids.add(tournament_id)
         return ids
-    
-    def get_monitored_slugs(self) -> Set[str]:
-        """Restituisce set di slug monitorati"""
-        slugs = set()
-        for league in self.monitored_leagues:
-            slug = league.get('slug', '').lower()
-            if slug:
-                slugs.add(slug)
-        return slugs
-    
-    def get_monitored_keywords(self) -> Set[str]:
-        """Restituisce set di keywords monitorate"""
-        keywords = set()
-        for league in self.monitored_leagues:
-            league_id = league.get('id', '')
-            if league_id in INITIAL_LEAGUES:
-                for kw in INITIAL_LEAGUES[league_id].get('keywords', []):
-                    keywords.add(kw.lower())
-        return keywords
     
     def is_match_0_0_first_half(self, match: Dict) -> bool:
         """Verifica se partita è 0-0 al primo tempo"""
@@ -439,98 +439,42 @@ class MatchMonitor:
         except:
             return (None, None, None)
     
-    def update_league_tournament_id(self, match: Dict):
-        """Aggiorna tournament_id di una lega monitorata se trovato in una partita"""
-        slug, name, tournament_id = self.get_league_info_from_match(match)
-        
-        if not tournament_id:
-            return
-        
-        # Cerca leghe monitorate che corrispondono ma non hanno ancora tournament_id
-        for league in self.monitored_leagues:
-            if league.get('tournament_id'):
-                continue  # Già ha tournament_id
-            
-            league_id = league.get('id', '')
-            if league_id not in INITIAL_LEAGUES:
-                continue
-            
-            league_info = INITIAL_LEAGUES[league_id]
-            
-            # Match per slug
-            if slug and league_info.get('slug', '').lower() in slug.lower():
-                league['tournament_id'] = tournament_id
-                logger.info(f"Aggiornato tournament_id per {league_info['name']}: {tournament_id}")
-                self.save_leagues()
-                return
-            
-            # Match per keywords nel nome
-            if name:
-                name_lower = name.lower()
-                for keyword in league_info.get('keywords', []):
-                    if keyword.lower() in name_lower:
-                        league['tournament_id'] = tournament_id
-                        logger.info(f"Aggiornato tournament_id per {league_info['name']}: {tournament_id}")
-                        self.save_leagues()
-                        return
-    
     def is_league_monitored(self, match: Dict) -> bool:
-        """Verifica se la lega della partita è monitorata usando tournament_id, slug o keywords"""
-        slug, name, tournament_id = self.get_league_info_from_match(match)
-        
-        if not slug and not name and not tournament_id:
+        """Verifica se la lega della partita è monitorata confrontando nome lega e stato"""
+        try:
+            tournament = match.get('tournament', {})
+            unique_tournament = tournament.get('uniqueTournament', {})
+            tournament_name = unique_tournament.get('name', tournament.get('name', '')).lower()
+            category = tournament.get('category', {})
+            country_name = category.get('name', '').lower() if isinstance(category, dict) else ''
+            full_name = f"{tournament_name} - {country_name}".lower()
+            
+            # Se abbiamo tournament_id configurato, usalo come primo filtro
+            unique_id = unique_tournament.get('id')
+            if unique_id:
+                monitored_ids = self.get_monitored_tournament_ids()
+                if unique_id in monitored_ids:
+                    return True
+            
+            # Match per nome lega e stato normalizzati
+            for league in self.monitored_leagues:
+                country_norm = league.get('country_norm') or normalize_country_name(league.get('country_input', '') or league.get('country', ''))
+                league_norm = league.get('league_norm') or normalize_league_name(league.get('league_input', '') or league.get('name', ''))
+                
+                if not country_norm or not league_norm:
+                    continue
+                
+                if country_norm in full_name and league_norm in full_name:
+                    # Aggiorna tournament_id se non presente ma disponibile
+                    if unique_id and not league.get('tournament_id'):
+                        league['tournament_id'] = unique_id
+                        self.save_leagues()
+                    return True
+            
             return False
-        
-        # 1. Match per tournament_id (più affidabile)
-        if tournament_id:
-            monitored_ids = self.get_monitored_tournament_ids()
-            if tournament_id in monitored_ids:
-                return True
-        
-        # 2. Match per slug
-        if slug:
-            monitored_slugs = self.get_monitored_slugs()
-            for monitored_slug in monitored_slugs:
-                if slug == monitored_slug or slug.startswith(monitored_slug) or monitored_slug in slug:
-                    # Se match trovato, aggiorna tournament_id se disponibile
-                    if tournament_id:
-                        self.update_league_tournament_id(match)
-                    return True
-        
-        # 3. Match per keywords nel nome
-        if name:
-            monitored_keywords = self.get_monitored_keywords()
-            name_lower = name.lower()
-            for keyword in monitored_keywords:
-                if keyword in name_lower:
-                    # Verifica che sia un match valido (non troppo generico)
-                    if len(keyword) > 3:  # Evita match troppo generici
-                        # Se match trovato, aggiorna tournament_id se disponibile
-                        if tournament_id:
-                            self.update_league_tournament_id(match)
-                        return True
-        
-        # 4. Match specifici per leghe note (fallback)
-        for league in self.monitored_leagues:
-            league_id = league.get('id', '')
-            if league_id in INITIAL_LEAGUES:
-                league_info = INITIAL_LEAGUES[league_id]
-                league_name = league_info['name'].lower()
-                
-                # Match esatto per nome
-                if name and (league_name in name or name in league_name):
-                    if tournament_id:
-                        self.update_league_tournament_id(match)
-                    return True
-                
-                # Match per keywords specifiche
-                for keyword in league_info.get('keywords', []):
-                    if keyword.lower() in name.lower() if name else False:
-                        if tournament_id:
-                            self.update_league_tournament_id(match)
-                        return True
-        
-        return False
+        except Exception as e:
+            logger.error(f"Errore verifica lega monitorata: {e}")
+            return False
     
     def format_match_notification(self, match: Dict) -> str:
         """Formatta messaggio notifica partita"""
@@ -657,7 +601,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📖 Comandi disponibili:\n\n"
         "/start - Messaggio di benvenuto\n"
         "/help - Mostra questa guida\n"
-        "/addLeague - Gestisci leghe da monitorare\n"
+        "/addLeague - Aggiungi nuova lega (stato + nome lega)\n"
+        "/deleteLeague - Rimuovi leghe dalla lista\n"
         "/leagues - Mostra leghe attualmente monitorate\n"
         "/chatid - Mostra il CHAT_ID di questa chat/gruppo\n"
         "/stats - Statistiche notifiche inviate\n"
@@ -704,14 +649,16 @@ async def leagues_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [f"📋 Leghe monitorate ({len(monitor.monitored_leagues)}):\n"]
     
     for i, league in enumerate(monitor.monitored_leagues, 1):
-        name = league.get('name', 'N/A')
-        country = league.get('country', '')
+        country_in = league.get('country_input', league.get('country', ''))
+        league_in = league.get('league_input', league.get('name', 'N/A'))
+        country_norm = league.get('country_norm', '')
+        league_norm = league.get('league_norm', '')
         tournament_id = league.get('tournament_id')
         
-        country_str = f" ({country})" if country else ""
-        id_str = f" [ID: {tournament_id}]" if tournament_id else ""
+        norm_str = f" → {league_norm} - {country_norm}" if league_norm or country_norm else ""
+        id_str = f" [tournament_id: {tournament_id}]" if tournament_id else ""
         
-        lines.append(f"{i}. {name}{country_str}{id_str}")
+        lines.append(f"{i}. {league_in} - {country_in}{norm_str}{id_str}")
     
     await update.message.reply_text("\n".join(lines))
 
@@ -752,132 +699,124 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler comando /addLeague - mostra interfaccia con checkbox per tutte le leghe SofaScore"""
+    """Handler comando /addLeague - flusso interattivo: stato -> nome lega"""
     try:
-        await update.message.reply_text("🔍 Recupero leghe da SofaScore...")
-        
-        # Carica leghe monitorate
         monitor = context.bot_data.get('monitor')
         if not monitor:
             await update.message.reply_text("❌ Errore: monitor non inizializzato.")
             return
         
-        # Recupera tutte le leghe da SofaScore
-        api = SofaScoreAPI()
-        tournaments = api.get_tournaments()
-        
-        if not tournaments:
-            await update.message.reply_text(
-                "❌ Errore: impossibile recuperare lista tornei da SofaScore.\n"
-                "Riprova più tardi o verifica la connessione."
-            )
-            return
-        
-        # Filtra solo leghe di calcio professionistiche (escludi leghe minori/dilettanti)
-        # Filtra per categoria o nome
-        professional_leagues = []
-        for tournament in tournaments:
-            name = tournament.get('name', '').lower()
-            slug = tournament.get('slug', '').lower()
-            category = tournament.get('category', {})
-            category_name = category.get('name', '').lower() if isinstance(category, dict) else ''
-            
-            # Escludi leghe minori/dilettanti
-            exclude_keywords = ['youth', 'u19', 'u20', 'u21', 'u23', 'reserve', 'academy', 'amateur', 'dilettanti']
-            if any(kw in name or kw in slug for kw in exclude_keywords):
-                continue
-            
-            professional_leagues.append(tournament)
-        
-        if not professional_leagues:
-            await update.message.reply_text(
-                "⚠️ Nessuna lega professionistica trovata.\n"
-                "Prova a usare le leghe predefinite."
-            )
-            return
-        
-        # Crea set di tournament_id monitorati per lookup veloce
-        monitored_tournament_ids = {
-            league.get('tournament_id') 
-            for league in monitor.monitored_leagues 
-            if league.get('tournament_id')
-        }
-        
-        # Salva temporaneamente la lista di tornei nel context per il callback
-        context.user_data['available_tournaments'] = professional_leagues
-        context.user_data['page'] = 0
-        
-        # Mostra prima pagina (max 10 leghe per pagina per limiti Telegram)
-        await show_league_page(update, context, 0, professional_leagues, monitored_tournament_ids)
-        
+        # Inizia flusso interattivo
+        context.user_data['add_league_state'] = 'await_country'
+        context.user_data.pop('add_league_country', None)
+        await update.message.reply_text(
+            "🌍 Inserisci lo **stato** della lega che vuoi aggiungere.\n"
+            "Esempi: `Italia`, `Inghilterra`, `Francia`, `Germany`...",
+            parse_mode='Markdown'
+        )
     except Exception as e:
         logger.error(f"Errore comando addLeague: {e}")
         await update.message.reply_text(f"❌ Errore: {e}")
 
 
-async def show_league_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int, 
-                          tournaments: List[Dict], monitored_ids: Set[int]):
-    """Mostra una pagina di leghe con checkbox"""
-    items_per_page = 8  # Max 8 per pagina (limiti Telegram)
-    total_pages = (len(tournaments) + items_per_page - 1) // items_per_page
-    start_idx = page * items_per_page
-    end_idx = min(start_idx + items_per_page, len(tournaments))
-    
-    page_tournaments = tournaments[start_idx:end_idx]
-    
-    keyboard = []
-    
-    # Aggiungi leghe della pagina corrente
-    for tournament in page_tournaments:
-        tournament_id = tournament.get('id')
-        name = tournament.get('name', 'N/A')
-        category = tournament.get('category', {})
-        country = category.get('name', '') if isinstance(category, dict) else ''
+async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce input testuali per flusso /addLeague"""
+    try:
+        state = context.user_data.get('add_league_state')
+        if not state:
+            # Nessun flusso attivo, ignora
+            return
         
-        is_selected = "✅" if tournament_id in monitored_ids else "☐"
-        country_str = f" ({country})" if country else ""
+        text = (update.message.text or "").strip()
+        monitor = context.bot_data.get('monitor')
+        if not monitor:
+            await update.message.reply_text("❌ Errore: monitor non inizializzato.")
+            context.user_data.pop('add_league_state', None)
+            return
         
-        # Tronca nome se troppo lungo (limite Telegram)
-        display_name = name[:30] + "..." if len(name) > 30 else name
-        button_text = f"{is_selected} {display_name}{country_str}"
-        callback_data = f"toggle_tournament:{tournament_id}:{page}"
+        # Step 1: stato
+        if state == 'await_country':
+            country_input = text
+            country_norm = normalize_country_name(country_input)
+            if not country_norm:
+                await update.message.reply_text("❌ Stato non valido. Riprova.")
+                return
+            
+            context.user_data['add_league_country'] = {
+                'input': country_input,
+                'norm': country_norm
+            }
+            context.user_data['add_league_state'] = 'await_league'
+            await update.message.reply_text(
+                f"✅ Stato impostato su: *{country_input}* → `{country_norm}`\n\n"
+                "Ora inserisci il **nome del campionato**.\n"
+                "Esempi: `Serie A`, `Serie B`, `Premier League`, `Ligue 1`...",
+                parse_mode='Markdown'
+            )
+            return
         
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=callback_data)])
-    
-    # Pulsanti navigazione
-    nav_buttons = []
-    if page > 0:
-        nav_buttons.append(InlineKeyboardButton("◀️ Precedente", callback_data=f"page:{page-1}"))
-    if page < total_pages - 1:
-        nav_buttons.append(InlineKeyboardButton("Successivo ▶️", callback_data=f"page:{page+1}"))
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    # Pulsanti azione
-    keyboard.append([
-        InlineKeyboardButton("✅ Conferma", callback_data="confirm_leagues"),
-        InlineKeyboardButton("🔍 Cerca", callback_data="search_leagues")
-    ])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message = (
-        f"📋 Seleziona le leghe da monitorare:\n\n"
-        f"Pagina {page + 1}/{total_pages}\n"
-        f"Leghe disponibili: {len(tournaments)}\n"
-        f"Monitorate: {len(monitored_ids)}\n\n"
-        f"Clicca su una lega per aggiungerla/rimuoverla."
-    )
-    
-    if update.callback_query:
-        await update.callback_query.edit_message_text(message, reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(message, reply_markup=reply_markup)
+        # Step 2: nome lega
+        if state == 'await_league':
+            league_input = text
+            league_norm = normalize_league_name(league_input)
+            if not league_norm:
+                await update.message.reply_text("❌ Nome lega non valido. Riprova.")
+                return
+            
+            country_data = context.user_data.get('add_league_country')
+            if not country_data:
+                await update.message.reply_text("❌ Errore interno. Riprova /addLeague.")
+                context.user_data.pop('add_league_state', None)
+                return
+            
+            country_input = country_data['input']
+            country_norm = country_data['norm']
+            
+            # Crea ID unico
+            league_id = f"{country_norm.replace(' ', '_')}-{league_norm.replace(' ', '_')}"
+            
+            # Verifica se già esiste
+            for league in monitor.monitored_leagues:
+                if league.get('id') == league_id:
+                    await update.message.reply_text(
+                        "ℹ️ Questa lega è già presente nella lista monitorata.\n"
+                        f"Stato: *{country_input}* → `{country_norm}`\n"
+                        f"Lega: *{league_input}* → `{league_norm}`",
+                        parse_mode='Markdown'
+                    )
+                    context.user_data.pop('add_league_state', None)
+                    context.user_data.pop('add_league_country', None)
+                    return
+            
+            # Aggiungi lega
+            monitor.monitored_leagues.append({
+                'id': league_id,
+                'country_input': country_input,
+                'league_input': league_input,
+                'country_norm': country_norm,
+                'league_norm': league_norm,
+                'tournament_id': None
+            })
+            monitor.save_leagues()
+            
+            context.user_data.pop('add_league_state', None)
+            context.user_data.pop('add_league_country', None)
+            
+            await update.message.reply_text(
+                "✅ Lega aggiunta alla lista monitorata!\n\n"
+                f"Stato: *{country_input}* → `{country_norm}`\n"
+                f"Lega: *{league_input}* → `{league_norm}`\n\n"
+                "Il bot inizierà a monitorare le partite 0-0 al primo tempo in questa lega.",
+                parse_mode='Markdown'
+            )
+            return
+    except Exception as e:
+        logger.error(f"Errore text_message_handler: {e}")
+        await update.message.reply_text(f"❌ Errore: {e}")
 
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler per callback query (checkbox leghe, paginazione)"""
+    """Handler per callback query (checkbox leghe, paginazione eliminazione)"""
     query = update.callback_query
     await query.answer()
     
@@ -887,100 +826,9 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Errore: monitor non inizializzato.")
             return
         
-        # Gestione paginazione
-        if query.data.startswith("page:"):
-            page = int(query.data.split(":")[1])
-            tournaments = context.user_data.get('available_tournaments', [])
-            if not tournaments:
-                await query.edit_message_text("❌ Errore: lista leghe non disponibile. Usa /addLeague di nuovo.")
-                return
-            
-            monitored_ids = {
-                league.get('tournament_id') 
-                for league in monitor.monitored_leagues 
-                if league.get('tournament_id')
-            }
-            await show_league_page(update, context, page, tournaments, monitored_ids)
-            return
-        
-        # Gestione toggle tournament
-        if query.data.startswith("toggle_tournament:"):
-            parts = query.data.split(":")
-            tournament_id = int(parts[1])
-            page = int(parts[2])
-            
-            tournaments = context.user_data.get('available_tournaments', [])
-            tournament = next((t for t in tournaments if t.get('id') == tournament_id), None)
-            
-            if not tournament:
-                await query.answer("❌ Lega non trovata", show_alert=True)
-                return
-            
-            # Crea set di tournament_id monitorati
-            monitored_ids = {
-                league.get('tournament_id') 
-                for league in monitor.monitored_leagues 
-                if league.get('tournament_id')
-            }
-            
-            # Toggle lega
-            if tournament_id in monitored_ids:
-                # Rimuovi lega
-                monitor.monitored_leagues = [
-                    l for l in monitor.monitored_leagues 
-                    if l.get('tournament_id') != tournament_id
-                ]
-                await query.answer("❌ Lega rimossa")
-            else:
-                # Aggiungi lega
-                category = tournament.get('category', {})
-                country = category.get('name', '') if isinstance(category, dict) else ''
-                
-                monitor.monitored_leagues.append({
-                    'id': f"tournament_{tournament_id}",  # ID univoco
-                    'name': tournament.get('name', 'N/A'),
-                    'slug': tournament.get('slug', ''),
-                    'country': country,
-                    'tournament_id': tournament_id
-                })
-                await query.answer("✅ Lega aggiunta")
-            
-            monitor.save_leagues()
-            
-            # Ricrea set aggiornato
-            monitored_ids = {
-                league.get('tournament_id') 
-                for league in monitor.monitored_leagues 
-                if league.get('tournament_id')
-            }
-            
-            # Mostra pagina aggiornata
-            await show_league_page(update, context, page, tournaments, monitored_ids)
-            return
-        
-        # Gestione conferma
-        if query.data == "confirm_leagues":
-            count = len(monitor.monitored_leagues)
-            league_names = [l.get('name', 'N/A') for l in monitor.monitored_leagues[:10]]
-            leagues_text = "\n".join([f"• {name}" for name in league_names])
-            if count > 10:
-                leagues_text += f"\n• ... e altre {count - 10} leghe"
-            
-            await query.edit_message_text(
-                f"✅ Configurazione salvata!\n\n"
-                f"Leghe monitorate: {count}\n\n"
-                f"{leagues_text}\n\n"
-                f"Il bot monitorerà queste leghe per partite 0-0 al primo tempo."
-            )
-            # Pulisci dati temporanei
-            context.user_data.pop('available_tournaments', None)
-            context.user_data.pop('page', None)
-            return
-        
-        # Gestione ricerca (placeholder)
-        if query.data == "search_leagues":
-            await query.answer("🔍 Funzione ricerca in sviluppo", show_alert=True)
-            return
+        # Per ora non ci sono callback specifici per deleteLeague;
+        # il supporto per checkbox di cancellazione può essere aggiunto qui in futuro.
+        await query.answer("⚠️ Nessuna azione associata a questo pulsante.", show_alert=True)
     
     except Exception as e:
         logger.error(f"Errore callback handler: {e}")
