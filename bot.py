@@ -340,11 +340,62 @@ class MatchMonitor:
         leagues_data = load_json_file(LEAGUES_FILE, {})
         if isinstance(leagues_data, dict) and 'monitored' in leagues_data:
             # Nuovo formato: dict con 'monitored' che contiene lista di dict con dettagli
-            self.monitored_leagues: List[Dict] = leagues_data.get('monitored', [])
+            monitored = leagues_data.get('monitored', [])
+            # Se la lista è vuota, inizializza con leghe di default
+            if not monitored:
+                self.monitored_leagues = self._get_default_leagues()
+                self.save_leagues()
+            else:
+                self.monitored_leagues: List[Dict] = monitored
         else:
-            # Nessuna configurazione o vecchio formato: inizia con lista vuota
-            self.monitored_leagues = []
+            # Nessuna configurazione: usa leghe iniziali di default
+            self.monitored_leagues = self._get_default_leagues()
             self.save_leagues()
+    
+    def _get_default_leagues(self) -> List[Dict]:
+        """Restituisce lista di leghe di default da monitorare"""
+        default_leagues = [
+            # Italia
+            {'country_input': 'Italia', 'league_input': 'Serie A', 'country_norm': 'italy', 'league_norm': 'serie a'},
+            {'country_input': 'Italia', 'league_input': 'Serie B', 'country_norm': 'italy', 'league_norm': 'serie b'},
+            # Francia
+            {'country_input': 'Francia', 'league_input': 'Ligue 1', 'country_norm': 'france', 'league_norm': 'ligue 1'},
+            {'country_input': 'Francia', 'league_input': 'Ligue 2', 'country_norm': 'france', 'league_norm': 'ligue 2'},
+            # Spagna
+            {'country_input': 'Spagna', 'league_input': 'La Liga', 'country_norm': 'spain', 'league_norm': 'la liga'},
+            {'country_input': 'Spagna', 'league_input': 'Segunda División', 'country_norm': 'spain', 'league_norm': 'segunda division'},
+            # Germania
+            {'country_input': 'Germania', 'league_input': 'Bundesliga', 'country_norm': 'germany', 'league_norm': 'bundesliga'},
+            {'country_input': 'Germania', 'league_input': '2. Bundesliga', 'country_norm': 'germany', 'league_norm': '2. bundesliga'},
+            # Inghilterra
+            {'country_input': 'Inghilterra', 'league_input': 'Premier League', 'country_norm': 'england', 'league_norm': 'premier league'},
+            {'country_input': 'Inghilterra', 'league_input': 'Championship', 'country_norm': 'england', 'league_norm': 'championship'},
+            {'country_input': 'Inghilterra', 'league_input': 'League One', 'country_norm': 'england', 'league_norm': 'league one'},
+            {'country_input': 'Inghilterra', 'league_input': 'League Two', 'country_norm': 'england', 'league_norm': 'league two'},
+            # Olanda
+            {'country_input': 'Olanda', 'league_input': 'Eredivisie', 'country_norm': 'netherlands', 'league_norm': 'eredivisie'},
+            # Altre leghe
+            {'country_input': 'Svizzera', 'league_input': 'Super League', 'country_norm': 'switzerland', 'league_norm': 'super league'},
+            {'country_input': 'Estonia', 'league_input': 'Meistriliiga', 'country_norm': 'estonia', 'league_norm': 'meistriliiga'},
+            {'country_input': 'Hong Kong', 'league_input': 'Premier League', 'country_norm': 'hong kong', 'league_norm': 'premier league'},
+            {'country_input': 'Lussemburgo', 'league_input': 'National Division', 'country_norm': 'luxembourg', 'league_norm': 'national division'},
+            {'country_input': 'Qatar', 'league_input': 'Stars League', 'country_norm': 'qatar', 'league_norm': 'stars league'},
+            {'country_input': 'Singapore', 'league_input': 'Premier League', 'country_norm': 'singapore', 'league_norm': 'premier league'},
+            {'country_input': 'Vietnam', 'league_input': 'V.League 1', 'country_norm': 'vietnam', 'league_norm': 'v.league 1'},
+            {'country_input': 'Norvegia', 'league_input': 'Eliteserien', 'country_norm': 'norway', 'league_norm': 'eliteserien'},
+            {'country_input': 'Norvegia', 'league_input': 'OBOS-ligaen', 'country_norm': 'norway', 'league_norm': 'obos-ligaen'},
+            {'country_input': 'Islanda', 'league_input': 'Úrvalsdeild', 'country_norm': 'iceland', 'league_norm': 'urvalsdeild'},
+            {'country_input': 'Islanda', 'league_input': '1. deild karla', 'country_norm': 'iceland', 'league_norm': '1. deild'},
+        ]
+        
+        # Aggiungi ID univoci
+        for league in default_leagues:
+            country_norm = league['country_norm'].replace(' ', '_')
+            league_norm = league['league_norm'].replace(' ', '_')
+            league['id'] = f"{country_norm}-{league_norm}"
+            league['tournament_id'] = None
+        
+        return default_leagues
     
     def save_leagues(self):
         """Salva leghe monitorate in formato strutturato"""
