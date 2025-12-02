@@ -668,24 +668,44 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler comando /chatid - mostra CHAT_ID della chat corrente"""
-    chat = update.effective_chat
-    chat_id = chat.id
-    chat_type = chat.type
-    
-    if chat_type == 'private':
-        message = f"📱 CHAT_ID (Chat Privata):\n`{chat_id}`\n\nCopia questo valore nella variabile d'ambiente CHAT_ID"
-    elif chat_type == 'group' or chat_type == 'supergroup':
-        message = (
-            f"👥 CHAT_ID (Gruppo):\n`{chat_id}`\n\n"
-            f"⚠️ Nota: I CHAT_ID dei gruppi sono numeri negativi.\n"
-            f"Copia questo valore nella variabile d'ambiente CHAT_ID.\n\n"
-            f"Tipo: {chat_type}\n"
-            f"Nome gruppo: {chat.title if hasattr(chat, 'title') else 'N/A'}"
-        )
-    else:
-        message = f"CHAT_ID: `{chat_id}`\nTipo: {chat_type}"
-    
-    await update.message.reply_text(message, parse_mode='Markdown')
+    try:
+        logger.info(f"Comando /chatid ricevuto da chat_id: {update.effective_chat.id}")
+        
+        chat = update.effective_chat
+        chat_id = chat.id
+        chat_type = chat.type
+        
+        if chat_type == 'private':
+            message = f"📱 CHAT_ID (Chat Privata):\n`{chat_id}`\n\nCopia questo valore nella variabile d'ambiente CHAT_ID"
+        elif chat_type == 'group' or chat_type == 'supergroup':
+            group_title = chat.title if hasattr(chat, 'title') else 'N/A'
+            message = (
+                f"👥 CHAT_ID (Gruppo):\n`{chat_id}`\n\n"
+                f"⚠️ Nota: I CHAT_ID dei gruppi sono numeri negativi.\n"
+                f"Copia questo valore nella variabile d'ambiente CHAT_ID.\n\n"
+                f"Tipo: {chat_type}\n"
+                f"Nome gruppo: {group_title}"
+            )
+        else:
+            message = f"CHAT_ID: `{chat_id}`\nTipo: {chat_type}"
+        
+        # Usa effective_message invece di message per maggiore sicurezza
+        if update.effective_message:
+            await update.effective_message.reply_text(message, parse_mode='Markdown')
+        elif update.message:
+            await update.message.reply_text(message, parse_mode='Markdown')
+        else:
+            # Fallback: invia direttamente alla chat
+            await context.bot.send_message(chat_id=chat_id, text=message, parse_mode='Markdown')
+            
+        logger.info(f"Risposta /chatid inviata con successo")
+    except Exception as e:
+        logger.error(f"Errore in chatid_command: {e}", exc_info=True)
+        try:
+            error_msg = f"❌ Errore: {str(e)}\n\nCHAT_ID: {update.effective_chat.id}"
+            await update.effective_message.reply_text(error_msg) if update.effective_message else await context.bot.send_message(chat_id=update.effective_chat.id, text=error_msg)
+        except:
+            pass
 
 
 async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1106,9 +1126,10 @@ def main():
         logger.error("TELEGRAM_TOKEN non configurato!")
         return
     
-    if not CHAT_ID:
-        logger.error("CHAT_ID non configurato!")
-        return
+    # CHAT_ID non è obbligatorio per i comandi, solo per le notifiche
+    # if not CHAT_ID:
+    #     logger.error("CHAT_ID non configurato!")
+    #     return
     
     # Crea applicazione Telegram
     application = Application.builder().token(TELEGRAM_TOKEN).build()
