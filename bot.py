@@ -1037,7 +1037,7 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
     
     # Gestione errori (ignora Conflict e NetworkError)
-    def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Gestisce errori durante l'elaborazione degli update"""
         error = context.error
         if isinstance(error, Conflict):
