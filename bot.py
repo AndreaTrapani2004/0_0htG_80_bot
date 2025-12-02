@@ -811,9 +811,78 @@ async def add_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(f"❌ Errore: {e}")
 
 
-async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gestisce input testuali per flusso /addLeague"""
+async def delete_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /deleteLeague - mostra lista leghe da rimuovere"""
     try:
+        monitor = context.bot_data.get('monitor')
+        if not monitor:
+            await update.message.reply_text("❌ Errore: monitor non inizializzato.")
+            return
+        
+        if not monitor.monitored_leagues:
+            await update.message.reply_text("📋 Nessuna lega configurata da rimuovere.")
+            return
+        
+        # Mostra lista numerata
+        lines = ["📋 Leghe monitorate (invia il numero per rimuoverle):\n"]
+        
+        for i, league in enumerate(monitor.monitored_leagues, 1):
+            country_in = league.get('country_input', league.get('country', ''))
+            league_in = league.get('league_input', league.get('name', 'N/A'))
+            lines.append(f"{i}. {league_in} - {country_in}")
+        
+        lines.append("\n💡 Invia il numero (es. `2`) o più numeri separati da virgola (es. `1,3,5`)")
+        
+        context.user_data['delete_league_state'] = True
+        await update.message.reply_text("\n".join(lines), parse_mode='Markdown')
+        
+    except Exception as e:
+        logger.error(f"Errore comando deleteLeague: {e}")
+        await update.message.reply_text(f"❌ Errore: {e}")
+
+
+async def text_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce input testuali per flusso /addLeague e /deleteLeague"""
+    try:
+        # Gestione deleteLeague
+        if context.user_data.get('delete_league_state'):
+            text = (update.message.text or "").strip()
+            monitor = context.bot_data.get('monitor')
+            if not monitor:
+                await update.message.reply_text("❌ Errore: monitor non inizializzato.")
+                context.user_data.pop('delete_league_state', None)
+                return
+            
+            # Parse numeri (es. "2" o "1,3,5")
+            try:
+                indices = [int(x.strip()) for x in text.split(',')]
+                indices = [i for i in indices if 1 <= i <= len(monitor.monitored_leagues)]
+            except ValueError:
+                await update.message.reply_text("❌ Formato non valido. Invia numeri separati da virgola (es. `1,3,5`)", parse_mode='Markdown')
+                return
+            
+            if not indices:
+                await update.message.reply_text("❌ Nessun numero valido. Riprova.")
+                return
+            
+            # Rimuovi leghe (in ordine inverso per non alterare gli indici)
+            removed = []
+            for idx in sorted(indices, reverse=True):
+                if 1 <= idx <= len(monitor.monitored_leagues):
+                    league = monitor.monitored_leagues.pop(idx - 1)
+                    removed.append(f"{league.get('league_input', 'N/A')} - {league.get('country_input', 'N/A')}")
+            
+            monitor.save_leagues()
+            context.user_data.pop('delete_league_state', None)
+            
+            removed_text = "\n".join([f"• {name}" for name in removed])
+            await update.message.reply_text(
+                f"✅ Leghe rimosse:\n\n{removed_text}\n\n"
+                f"Rimangono {len(monitor.monitored_leagues)} leghe monitorate."
+            )
+            return
+        
+        # Gestione addLeague
         state = context.user_data.get('add_league_state')
         if not state:
             # Nessun flusso attivo, ignora
@@ -966,7 +1035,6 @@ def main():
     
     # Handler per input testuali dei flussi interattivi
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, delete_league_text_handler))
     
     # Gestione errori (ignora Conflict e NetworkError)
     def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
