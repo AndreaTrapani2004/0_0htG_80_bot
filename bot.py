@@ -10,6 +10,7 @@ import logging
 import threading
 import asyncio
 from datetime import datetime
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, List, Set, Optional
 
@@ -604,6 +605,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/addLeague - Aggiungi nuova lega (stato + nome lega)\n"
         "/deleteLeague - Rimuovi leghe dalla lista\n"
         "/leagues - Mostra leghe attualmente monitorate\n"
+        "/testMatch <event_id|url> - Testa se una partita appartiene a una lega monitorata\n"
         "/chatid - Mostra il CHAT_ID di questa chat/gruppo\n"
         "/stats - Statistiche notifiche inviate\n"
         "/status - Stato del bot\n\n"
@@ -696,6 +698,96 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Usa /help per vedere tutti i comandi disponibili."
     )
     await update.message.reply_text(message)
+
+
+async def test_match_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Testa se una partita SofaScore appartiene a una lega monitorata"""
+    try:
+        monitor = context.bot_data.get('monitor')
+        if not monitor:
+            await update.message.reply_text("❌ Errore: monitor non inizializzato.")
+            return
+        
+        text = update.message.text or ""
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "Uso: /testMatch <event_id oppure URL SofaScore>\n\n"
+                "Esempi:\n"
+                "/testMatch 1234567\n"
+                "/testMatch https://www.sofascore.com/event/1234567"
+            )
+            return
+        
+        arg = parts[1].strip()
+        
+        # Estrai event_id da URL o stringa
+        m = re.search(r"/event/(\\d+)", arg)
+        if m:
+            event_id_str = m.group(1)
+        else:
+            m = re.search(r"\\d+", arg)
+            if not m:
+                await update.message.reply_text("❌ Impossibile estrarre un event_id valido dall'input.")
+                return
+            event_id_str = m.group(0)
+        
+        try:
+            event_id = int(event_id_str)
+        except ValueError:
+            await update.message.reply_text("❌ event_id non valido.")
+            return
+        
+        api = SofaScoreAPI()
+        details = api.get_match_details(event_id)
+        if not details or 'event' not in details:
+            await update.message.reply_text("❌ Impossibile recuperare dettagli della partita da SofaScore.")
+            return
+        
+        event = details.get('event', {})
+        tournament = event.get('tournament', {})
+        unique_tournament = tournament.get('uniqueTournament', {})
+        category = tournament.get('category', {})
+        
+        tournament_name = unique_tournament.get('name', tournament.get('name', 'N/A'))
+        country_name = category.get('name', 'N/A') if isinstance(category, dict) else 'N/A'
+        unique_id = unique_tournament.get('id')
+        
+        full_name = f"{tournament_name} - {country_name}"
+        
+        # Verifica se la partita sarebbe considerata in lega monitorata
+        is_monitored = monitor.is_league_monitored({'tournament': tournament})
+        
+        # Prepara info sulle leghe monitorate
+        monitored_lines = []
+        for league in monitor.monitored_leagues[:10]:
+            country_in = league.get('country_input', league.get('country', ''))
+            league_in = league.get('league_input', league.get('name', 'N/A'))
+            country_norm = league.get('country_norm', '')
+            league_norm = league.get('league_norm', '')
+            tid = league.get('tournament_id')
+            norm_str = f" ({league_norm} - {country_norm})" if league_norm or country_norm else ""
+            id_str = f" [tid:{tid}]" if tid else ""
+            monitored_lines.append(f"• {league_in} - {country_in}{norm_str}{id_str}")
+        
+        if len(monitor.monitored_leagues) > 10:
+            monitored_lines.append(f"• ... e altre {len(monitor.monitored_leagues) - 10} leghe")
+        
+        msg = (
+            f"🔍 Test match SofaScore\n\n"
+            f"Event ID: `{event_id}`\n"
+            f"Torneo: *{tournament_name}* - *{country_name}*\n"
+            f"Full: `{full_name}`\n"
+            f"uniqueTournament.id: `{unique_id}`\n\n"
+            f"👉 Appartiene a lega monitorata? {'✅ Sì' if is_monitored else '❌ No'}\n\n"
+            f"📋 Leghe monitorate (prime 10):\n" +
+            ("\n".join(monitored_lines) if monitored_lines else "Nessuna lega configurata.")
+        )
+        
+        await update.message.reply_text(msg, parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Errore test_match_command: {e}")
+        await update.message.reply_text(f"❌ Errore: {e}")
 
 
 async def add_league_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -860,15 +952,21 @@ def main():
     monitor = MatchMonitor(api, application)
     application.bot_data['monitor'] = monitor
     
-    # Registra handler
+    # Registra handler comandi
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("addLeague", add_league_command))
+    application.add_handler(CommandHandler("deleteLeague", delete_league_command))
     application.add_handler(CommandHandler("leagues", leagues_command))
+    application.add_handler(CommandHandler("testMatch", test_match_command))
     application.add_handler(CommandHandler("chatid", chatid_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CallbackQueryHandler(callback_handler))
+    
+    # Handler per input testuali dei flussi interattivi
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_message_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, delete_league_text_handler))
     
     # Gestione errori (ignora Conflict e NetworkError)
     def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
