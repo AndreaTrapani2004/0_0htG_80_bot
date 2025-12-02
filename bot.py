@@ -688,6 +688,52 @@ async def chatid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, parse_mode='Markdown')
 
 
+async def test_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handler comando /test - invia messaggio di prova alla CHAT_ID configurata"""
+    if not CHAT_ID:
+        await update.message.reply_text(
+            "❌ Errore: CHAT_ID non configurato nelle variabili d'ambiente.\n"
+            "Configura CHAT_ID su Render.com prima di usare questo comando."
+        )
+        return
+    
+    try:
+        current_chat_id = update.effective_chat.id
+        configured_chat_id = int(CHAT_ID) if CHAT_ID.lstrip('-').isdigit() else None
+        
+        # Messaggio informativo
+        test_message = (
+            f"🧪 Test CHAT_ID\n\n"
+            f"📋 CHAT_ID configurata: `{CHAT_ID}`\n"
+            f"📱 CHAT_ID corrente: `{current_chat_id}`\n\n"
+        )
+        
+        if configured_chat_id and current_chat_id == configured_chat_id:
+            test_message += "✅ Le CHAT_ID corrispondono! Il bot funziona correttamente."
+        else:
+            test_message += (
+                "⚠️ Le CHAT_ID NON corrispondono!\n\n"
+                f"Usa `/chatid` per ottenere la CHAT_ID corretta di questo gruppo,\n"
+                f"poi aggiorna la variabile d'ambiente CHAT_ID su Render.com con:\n"
+                f"`{current_chat_id}`"
+            )
+        
+        # Prova a inviare alla CHAT_ID configurata
+        try:
+            await context.bot.send_message(
+                chat_id=CHAT_ID,
+                text=f"🧪 Messaggio di test dal bot!\n\nSe vedi questo messaggio, la CHAT_ID è corretta.\n\nCHAT_ID: `{CHAT_ID}`",
+                parse_mode='Markdown'
+            )
+            test_message += "\n\n✅ Messaggio inviato anche alla CHAT_ID configurata!"
+        except Exception as e:
+            test_message += f"\n\n❌ Errore invio alla CHAT_ID configurata: {str(e)}\n\nVerifica che:\n- Il bot sia nel gruppo con quella CHAT_ID\n- La CHAT_ID sia corretta"
+        
+        await update.message.reply_text(test_message, parse_mode='Markdown')
+    except Exception as e:
+        await update.message.reply_text(f"❌ Errore durante il test: {str(e)}")
+
+
 async def leagues_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler comando /leagues - mostra leghe monitorate"""
     monitor = context.bot_data.get('monitor')
@@ -1080,6 +1126,7 @@ def main():
     application.add_handler(CommandHandler("leagues", leagues_command))
     application.add_handler(CommandHandler("testMatch", test_match_command))
     application.add_handler(CommandHandler("chatid", chatid_command))
+    application.add_handler(CommandHandler("test", test_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CallbackQueryHandler(callback_handler))
