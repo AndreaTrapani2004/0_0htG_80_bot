@@ -256,6 +256,8 @@ class SofaScoreAPI:
         try:
             # Prova multipli endpoint
             endpoints = [
+                # Endpoint config "grandi tornei" scoperto dalla web app
+                f"{self.base_url}/config/unique-tournaments/EN/football",
                 f"{self.base_url}/sport/football/unique-tournaments",
                 f"{self.base_url}/unique-tournaments",
                 f"{self.base_url}/sport/{sport_id}/unique-tournaments",
