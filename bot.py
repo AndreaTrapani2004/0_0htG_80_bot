@@ -74,6 +74,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Riduci lo spam di log da httpx (es. 409 Conflict su getUpdates)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 
 class KeepAliveHandler(BaseHTTPRequestHandler):
     """HTTP Handler per keep-alive su Render.com"""
