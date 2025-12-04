@@ -7,8 +7,7 @@ import os
 import re
 import requests
 from datetime import datetime, timedelta
-from telegram import Bot
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import Conflict, NetworkError
 from threading import Thread
 import logging
@@ -22,10 +21,6 @@ POLL_INTERVAL = 60  # Intervallo di controllo in secondi
 SOFASCORE_API_URL = "https://api.sofascore.com/api/v1"
 # Proxy opzionale per SofaScore (es. Cloudflare Workers). Se settato, sostituisce la base URL.
 SOFASCORE_PROXY_BASE = os.getenv("SOFASCORE_PROXY_BASE", SOFASCORE_API_URL)
-
-
-# Bot Telegram
-bot = Bot(token=TELEGRAM_TOKEN)
 
 
 # File per salvare le partite già notificate (evita duplicati)
@@ -393,13 +388,13 @@ def format_match_notification(match):
     return message
 
 
-def send_notification(match):
+async def send_notification(match, application):
     """Invia notifica Telegram per partita 0-0 a fine primo tempo"""
     global total_notifications_sent
     
     try:
         message = format_match_notification(match)
-        bot.send_message(chat_id=CHAT_ID, text=message)
+        await application.bot.send_message(chat_id=CHAT_ID, text=message)
         
         # Aggiorna statistiche
         total_notifications_sent += 1
@@ -417,8 +412,9 @@ def send_notification(match):
 
 # ---------- LOGICA PRINCIPALE ----------
 
-def process_matches():
+def process_matches(application):
     """Processa tutte le partite live e invia notifiche per 0-0 a fine primo tempo"""
+    import asyncio
     sent_matches = load_sent_matches()
     
     # Scraping partite live
@@ -443,8 +439,30 @@ def process_matches():
         
         # Verifica se è 0-0 a fine primo tempo
         if is_match_0_0_first_half(match):
-            # Invia notifica
-            send_notification(match)
+            # Invia notifica (async) usando application.bot
+            try:
+                # Ottieni il loop dell'application
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    # Se non c'è loop, prova a ottenerlo dall'application
+                    if hasattr(application, '_updater') and hasattr(application._updater, '_loop'):
+                        loop = application._updater._loop
+                    else:
+                        # Crea un nuovo loop
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                
+                # Usa run_coroutine_threadsafe se il loop è in esecuzione
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(send_notification(match, application), loop)
+                else:
+                    # Altrimenti esegui direttamente
+                    loop.run_until_complete(send_notification(match, application))
+            except Exception as e:
+                now_utc = datetime.utcnow().isoformat() + "Z"
+                print(f"[{now_utc}] ⚠️ Errore invio notifica async: {e}")
+                sys.stdout.flush()
             
             # Salva come notificata
             sent_matches[match_id] = {
@@ -475,7 +493,7 @@ daily_notifications = defaultdict(int)
 
 # ---------- COMANDI TELEGRAM ----------
 
-def cmd_start(update, context):
+async def cmd_start(update, context):
     """Messaggio di benvenuto"""
     welcome_text = (
         "👋 Benvenuto in 0-0 HT Bot!\n\n"
@@ -486,15 +504,15 @@ def cmd_start(update, context):
         "📋 Usa /help per vedere tutti i comandi disponibili\n"
         "📊 Usa /status per lo stato del bot"
     )
-    update.effective_message.reply_text(welcome_text)
+    await update.message.reply_text(welcome_text)
 
 
-def cmd_ping(update, context):
+async def cmd_ping(update, context):
     """Verifica se il bot è attivo"""
-    update.effective_message.reply_text("pong ✅")
+    await update.message.reply_text("pong ✅")
 
 
-def cmd_help(update, context):
+async def cmd_help(update, context):
     """Mostra guida dettagliata"""
     help_text = (
         "⚽ 0-0 HT Bot - Notifiche 0-0 al Primo Tempo\n\n"
@@ -508,10 +526,10 @@ def cmd_help(update, context):
         "/live - Elenco partite live 0-0\n"
         "/stats - Statistiche notifiche (ultimi 7 giorni)"
     )
-    update.effective_message.reply_text(help_text)
+    await update.message.reply_text(help_text)
 
 
-def cmd_status(update, context):
+async def cmd_status(update, context):
     """Mostra stato del bot"""
     lines = []
     lines.append("📊 Stato Bot:")
@@ -540,24 +558,24 @@ def cmd_status(update, context):
     lines.append(f"Notifiche oggi: {daily_notifications.get(today, 0)}")
     lines.append(f"Totale notifiche: {total_notifications_sent}")
     
-    update.effective_message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines))
 
 
-def cmd_live(update, context):
+async def cmd_live(update, context):
     """Mostra partite live 0-0"""
     try:
         # Esegui uno scraping veloce
         matches = scrape_sofascore()
         
         if not matches:
-            update.effective_message.reply_text("Nessuna partita live al momento.")
+            await update.message.reply_text("Nessuna partita live al momento.")
             return
         
         # Filtra solo partite 0-0
         zero_zero = [m for m in matches if m["score_home"] == 0 and m["score_away"] == 0]
         
         if not zero_zero:
-            update.effective_message.reply_text(f"Trovate {len(matches)} partite live, nessuna in 0-0.")
+            await update.message.reply_text(f"Trovate {len(matches)} partite live, nessuna in 0-0.")
             return
         
         lines = [f"📊 Partite live 0-0: {len(zero_zero)}"]
@@ -569,12 +587,12 @@ def cmd_live(update, context):
         if len(zero_zero) > 20:
             lines.append(f"... e altre {len(zero_zero) - 20} partite")
         
-        update.effective_message.reply_text("\n".join(lines)[:4000])
+        await update.message.reply_text("\n".join(lines)[:4000])
     except Exception as e:
-        update.effective_message.reply_text(f"Errore nel recupero partite: {e}")
+        await update.message.reply_text(f"Errore nel recupero partite: {e}")
 
 
-def cmd_stats(update, context):
+async def cmd_stats(update, context):
     """Mostra statistiche notifiche"""
     today = datetime.now().date()
     lines = ["📊 Statistiche notifiche (ultimi 7 giorni):"]
@@ -591,21 +609,14 @@ def cmd_stats(update, context):
     lines.append(f"\nTotale settimana: {total_week}")
     lines.append(f"Totale generale: {total_notifications_sent}")
     
-    update.effective_message.reply_text("\n".join(lines))
+    await update.message.reply_text("\n".join(lines))
 
 
 def setup_telegram_commands():
-    """Configura e avvia Updater per comandi Telegram"""
+    """Configura e avvia Application per comandi Telegram"""
     try:
-        # Elimina webhook se presente
-        try:
-            bot.delete_webhook(drop_pending_updates=True)
-            print("✅ Webhook eliminato (se presente)")
-        except Exception as e:
-            print(f"⚠️ Errore eliminazione webhook (probabilmente non presente): {e}")
-        
-        updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-        dp = updater.dispatcher
+        # Crea Application
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Configura logging per sopprimere errori Conflict
         logging.basicConfig(
@@ -622,11 +633,11 @@ def setup_telegram_commands():
         # Applica filtro ai logger di telegram
         telegram_logger = logging.getLogger('telegram')
         telegram_logger.addFilter(ConflictFilter())
-        updater_logger = logging.getLogger('telegram.ext.updater')
-        updater_logger.addFilter(ConflictFilter())
+        httpx_logger = logging.getLogger('httpx')
+        httpx_logger.addFilter(ConflictFilter())
         
         # Gestione errori
-        def error_handler(update, context):
+        async def error_handler(update, context: ContextTypes.DEFAULT_TYPE):
             """Gestisce errori durante l'elaborazione degli update"""
             error = context.error
             if isinstance(error, Conflict):
@@ -639,29 +650,33 @@ def setup_telegram_commands():
                 # Log altri errori
                 print(f"⚠️ Errore durante elaborazione update: {error}")
         
-        dp.add_error_handler(error_handler)
+        application.add_error_handler(error_handler)
         
         # Registra comandi
-        dp.add_handler(CommandHandler("start", cmd_start))
-        dp.add_handler(CommandHandler("ping", cmd_ping))
-        dp.add_handler(CommandHandler("help", cmd_help))
-        dp.add_handler(CommandHandler("status", cmd_status))
-        dp.add_handler(CommandHandler("live", cmd_live))
-        dp.add_handler(CommandHandler("stats", cmd_stats))
+        application.add_handler(CommandHandler("start", cmd_start))
+        application.add_handler(CommandHandler("ping", cmd_ping))
+        application.add_handler(CommandHandler("help", cmd_help))
+        application.add_handler(CommandHandler("status", cmd_status))
+        application.add_handler(CommandHandler("live", cmd_live))
+        application.add_handler(CommandHandler("stats", cmd_stats))
         
-        # Avvia polling con gestione errori silenziosa
-        try:
-            updater.start_polling(drop_pending_updates=True)
-            print("✅ Updater Telegram avviato - Comandi disponibili")
-        except Conflict:
-            print("⚠️ Errore Conflict all'avvio (probabilmente più istanze in esecuzione)")
-            print("⚠️ Il bot continuerà a funzionare ma potrebbe non ricevere comandi")
-        except Exception as e:
-            print(f"⚠️ Errore all'avvio polling: {e}")
+        # Avvia polling in thread separato
+        def run_polling():
+            try:
+                application.run_polling(drop_pending_updates=True)
+                print("✅ Application Telegram avviato - Comandi disponibili")
+            except Conflict:
+                print("⚠️ Errore Conflict all'avvio (probabilmente più istanze in esecuzione)")
+                print("⚠️ Il bot continuerà a funzionare ma potrebbe non ricevere comandi")
+            except Exception as e:
+                print(f"⚠️ Errore all'avvio polling: {e}")
         
-        return updater
+        polling_thread = Thread(target=run_polling, daemon=True)
+        polling_thread.start()
+        
+        return application
     except Exception as e:
-        print(f"⚠️ Errore nell'avvio Updater: {e}")
+        print(f"⚠️ Errore nell'avvio Application: {e}")
         return None
 
 
@@ -726,8 +741,11 @@ def main():
     port = int(os.getenv('PORT', 8080))
     start_http_server(port)
     
-    # Avvia Updater per comandi Telegram in background
-    updater = setup_telegram_commands()
+    # Avvia Application per comandi Telegram in background
+    application = setup_telegram_commands()
+    
+    # Attendi un po' per permettere all'application di inizializzarsi
+    time.sleep(2)
     
     while True:
         try:
@@ -736,7 +754,10 @@ def main():
             print(f"[{cycle_start_utc}] ▶️ Inizio ciclo controllo partite")
             sys.stdout.flush()
             last_check_error = None
-            process_matches()
+            if application:
+                process_matches(application)
+            else:
+                print("⚠️ Application non disponibile, salto controllo")
             last_check_finished_at = datetime.now()
             cycle_end_utc = datetime.utcnow().isoformat() + "Z"
             print(f"[{cycle_end_utc}] ⏹️ Fine ciclo controllo partite")
