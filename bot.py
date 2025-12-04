@@ -309,11 +309,11 @@ def scrape_sofascore():
 
 def is_match_0_0_first_half(match):
     """
-    Verifica se una partita è 0-0 a fine primo tempo.
+    Verifica se una partita è 0-0 a fine primo tempo durante l'intervallo.
     
     Criteri:
     - Punteggio è 0-0
-    - Minuto >= 45 O periodo = 1 (fine primo tempo) O status indica fine primo tempo
+    - Status code 31 (halftime/intervallo) O periodo = 2 con minuto <= 50 (per confermare che il primo tempo era 0-0)
     """
     score_home = match.get("score_home", 0)
     score_away = match.get("score_away", 0)
@@ -327,28 +327,13 @@ def is_match_0_0_first_half(match):
     status_code = match.get("status_code")
     status_desc = match.get("status_description", "").lower()
     
-    # Verifica fine primo tempo:
-    # 1. Minuto >= 45 (fine primo tempo)
-    # 2. Periodo = 1 E minuto >= 40 (primo tempo avanzato)
-    # 3. Status indica fine primo tempo (halftime, break, etc.)
-    # 4. Status code 31 = halftime
-    
+    # Verifica che la partita sia in intervallo (status code 31 = halftime)
     if status_code == 31 or "halftime" in status_desc or "break" in status_desc:
         return True
     
-    if minute is not None:
-        # Se minuto >= 45, è fine primo tempo
-        if minute >= 45:
-            return True
-        # Se periodo = 1 e minuto >= 40, consideriamo fine primo tempo
-        if period == 1 and minute >= 40:
-            return True
-    
-    # Se periodo = 2, significa che il primo tempo è finito
-    # Ma dobbiamo verificare che il punteggio sia ancora 0-0
+    # Fallback: Se periodo = 2 e minuto <= 50, significa che il primo tempo è appena finito
+    # e il punteggio è ancora 0-0 (conferma che il primo tempo era 0-0)
     if period == 2:
-        # Verifica che il minuto sia ancora basso (primi minuti del secondo tempo)
-        # per essere sicuri che il primo tempo era 0-0
         if minute is not None and minute <= 50:
             return True
     
@@ -500,7 +485,7 @@ async def cmd_start(update, context):
         "⚽ Bot per notifiche 0-0 al Primo Tempo\n\n"
         "Il bot monitora tutte le partite live da SofaScore e ti avvisa quando:\n"
         "• Una partita è 0-0\n"
-        "• È alla fine del primo tempo (minuto >= 45 o periodo = 1 finito)\n\n"
+        "• È in intervallo (status code 31 = halftime)\n\n"
         "📋 Usa /help per vedere tutti i comandi disponibili\n"
         "📊 Usa /status per lo stato del bot"
     )
@@ -517,7 +502,7 @@ async def cmd_help(update, context):
     help_text = (
         "⚽ 0-0 HT Bot - Notifiche 0-0 al Primo Tempo\n\n"
         "Cosa fa: Monitora tutte le partite live (SofaScore) e invia notifiche "
-        "quando una partita è 0-0 a fine primo tempo.\n\n"
+        "quando una partita è 0-0 durante l'intervallo (status code 31 = halftime).\n\n"
         "📋 Comandi disponibili:\n"
         "/start - Messaggio di benvenuto\n"
         "/ping - Verifica se il bot è attivo\n"
