@@ -26,6 +26,10 @@ SOFASCORE_PROXY_BASE = os.getenv("SOFASCORE_PROXY_BASE", SOFASCORE_API_URL)
 # File per salvare le partite già notificate (evita duplicati)
 SENT_MATCHES_FILE = "sent_matches.json"
 
+# Tracciamento rate limiting r.jina.ai
+_jina_ai_rate_limited_until = None  # Timestamp fino a quando evitare r.jina.ai
+JINA_AI_COOLDOWN_SECONDS = 300  # 5 minuti di cooldown dopo un 429
+
 
 
 
@@ -60,6 +64,7 @@ def get_match_id(home, away, league, event_id=None):
 
 def _fetch_sofascore_json(url, headers):
     """Tenta fetch diretto; su 403 usa fallback r.jina.ai come proxy pubblico."""
+    global _jina_ai_rate_limited_until
     now_utc = datetime.utcnow().isoformat() + "Z"
     try:
         resp = requests.get(url, headers=headers, timeout=15)
@@ -72,6 +77,12 @@ def _fetch_sofascore_json(url, headers):
                 return None
         if resp.status_code != 403:
             print(f"[{now_utc}] ⚠️ Errore API SofaScore: status={resp.status_code}")
+            sys.stdout.flush()
+            return None
+        # Controlla se siamo in cooldown per r.jina.ai
+        if _jina_ai_rate_limited_until and datetime.now() < _jina_ai_rate_limited_until:
+            remaining = (_jina_ai_rate_limited_until - datetime.now()).total_seconds()
+            print(f"[{now_utc}] ⏸️ r.jina.ai in cooldown per altri {int(remaining)} secondi (rate limit)")
             sys.stdout.flush()
             return None
         # Fallback via r.jina.ai (no crediti, spesso evita blocchi IP)
@@ -115,8 +126,14 @@ def _fetch_sofascore_json(url, headers):
                     print(f"[{now_utc}] ⚠️ Impossibile parsare JSON dal fallback, primi 200 char: {prox_resp.text[:200]!r}")
                     sys.stdout.flush()
                     return None
-        print(f"[{now_utc}] ⚠️ Fallback r.jina.ai fallito: status={prox_resp.status_code}")
-        sys.stdout.flush()
+        # Gestisci rate limiting (429)
+        if prox_resp.status_code == 429:
+            _jina_ai_rate_limited_until = datetime.now() + timedelta(seconds=JINA_AI_COOLDOWN_SECONDS)
+            print(f"[{now_utc}] ⚠️ Fallback r.jina.ai fallito: status=429 (rate limit). Cooldown per {JINA_AI_COOLDOWN_SECONDS} secondi")
+            sys.stdout.flush()
+        else:
+            print(f"[{now_utc}] ⚠️ Fallback r.jina.ai fallito: status={prox_resp.status_code}")
+            sys.stdout.flush()
         return None
     except Exception as e:
         print(f"[{now_utc}] ⚠️ Eccezione fetch SofaScore: {e}")
@@ -375,7 +392,7 @@ def format_match_notification(match):
 
 async def send_notification(match, application):
     """Invia notifica Telegram per partita 0-0 a fine primo tempo"""
-    global total_notifications_sent
+    global total_notifications_sent, CHAT_ID
     
     try:
         message = format_match_notification(match)
@@ -390,8 +407,33 @@ async def send_notification(match, application):
         print(f"[{now_utc}] ✅ Notifica inviata: {match.get('home')} - {match.get('away')} (0-0 HT)")
         sys.stdout.flush()
     except Exception as e:
+        error_msg = str(e)
         now_utc = datetime.utcnow().isoformat() + "Z"
-        print(f"[{now_utc}] ⚠️ Errore invio notifica: {e}")
+        
+        # Gestisci migrazione gruppo a supergruppo
+        if "Group migrated to supergroup" in error_msg:
+            # Estrai il nuovo chat_id dal messaggio di errore
+            import re
+            match_result = re.search(r'New chat id: (-?\d+)', error_msg)
+            if match_result:
+                new_chat_id = int(match_result.group(1))
+                print(f"[{now_utc}] 🔄 Gruppo migrato a supergruppo. Aggiorno CHAT_ID da {CHAT_ID} a {new_chat_id}")
+                sys.stdout.flush()
+                CHAT_ID = new_chat_id
+                # Prova a reinviare con il nuovo chat_id
+                try:
+                    await application.bot.send_message(chat_id=CHAT_ID, text=message)
+                    total_notifications_sent += 1
+                    today = datetime.now().strftime("%Y-%m-%d")
+                    daily_notifications[today] += 1
+                    print(f"[{now_utc}] ✅ Notifica inviata con nuovo chat_id: {match.get('home')} - {match.get('away')} (0-0 HT)")
+                    sys.stdout.flush()
+                    return
+                except Exception as retry_e:
+                    print(f"[{now_utc}] ⚠️ Errore reinvio notifica dopo migrazione: {retry_e}")
+                    sys.stdout.flush()
+        
+        print(f"[{now_utc}] ⚠️ Errore invio notifica: {error_msg}")
         sys.stdout.flush()
 
 
